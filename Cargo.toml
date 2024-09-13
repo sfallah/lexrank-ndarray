@@ -1,0 +1,22 @@
+[package]
+name = "ndarray-benches"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ndarray = { version = "0.16.1", features = ["rayon"] }
+ndarray-rand = "0.15.0"
+anyhow = "1.0.44"
+accelerate-src = { version = "0.3.2", optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5.1", default-features = false }
+
+[features]
+default = []
+accelerate = ["dep:accelerate-src", "ndarray/blas"]
+blas = ["ndarray/blas"]
+
+[[bench]]
+name = "benchmarks"
+harness = false
