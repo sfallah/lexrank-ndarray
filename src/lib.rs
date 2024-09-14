@@ -3,6 +3,10 @@ use ndarray_rand::rand_distr::Normal;
 use ndarray_rand::RandomExt;
 use ndarray::parallel::prelude::*;
 
+#[cfg(feature = "mkl")]
+extern crate intel_mkl_src;
+
+
 
 pub fn get_rand_arr2_f32(
     m: usize,

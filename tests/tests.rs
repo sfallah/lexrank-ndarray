@@ -14,7 +14,7 @@ mod tests {
         let add = linear_forward(&lhs, &rhs, &bias)?;
 
         assert_eq!(add.shape(), [m, n]);
-        println!("{:?}", add);
+        println!("{:8.4}", add);
         Ok(())
     }
 }

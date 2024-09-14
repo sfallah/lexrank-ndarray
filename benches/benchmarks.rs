@@ -1,5 +1,7 @@
 use criterion::{black_box, criterion_main, Criterion};
 use ndarray_benches::{get_rand_arr1_f32, get_rand_arr2_f32, linear_forward};
+//#[cfg(feature = "mkl")]
+//extern crate intel_mkl_src;
 
 pub fn ndarray_linear_forward(c: &mut Criterion) {
     let m = 16;
