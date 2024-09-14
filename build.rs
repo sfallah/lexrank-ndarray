@@ -3,6 +3,6 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=Accelerate");
     #[cfg(all(target_os = "linux", feature = "blas"))]
     println!("cargo:rustc-link-lib=blas");
-    #[cfg(all(target_os = "linux", feature = "mkl"))]
-    println!("cargo:rustc-link-search=/opt/intel/mkl");
+    //#[cfg(feature = "mkl")]
+    //println!("cargo:rustc-link-search=/opt/intel/mkl");
 }
