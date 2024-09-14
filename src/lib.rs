@@ -2,6 +2,9 @@ use ndarray::{Array, Array1, Array2};
 use ndarray_rand::rand_distr::Normal;
 use ndarray_rand::RandomExt;
 
+#[cfg(feature = "mkl")]
+extern crate intel_mkl_src;
+
 pub fn get_rand_arr2_f32(
     m: usize,
     n: usize,
