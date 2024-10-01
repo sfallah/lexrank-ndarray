@@ -1,6 +1,10 @@
+
 mod tests {
+
     use ndarray::{Array, Array1};
-    use ndarray_benches::{cosine_sim, get_rand_arr1_f32, get_rand_arr2_f32, linear_forward, normalize_l2};
+    use ndarray_benches::{similarity_matrix, get_rand_arr1_f32, get_rand_arr2_f32, linear_forward, normalize_l2, lexrank, lexrank_ts};
+    use ndarray_benches::utils::{load_split_tensor, load_splits_data};
+
 
     #[test]
     fn ndarray_matmul() -> anyhow::Result<()> {
@@ -26,7 +30,7 @@ mod tests {
         let mean = 100.0;
         let std_dev = 15.0;
         let embeddings = get_rand_arr2_f32(m, n, mean, std_dev)?;
-        let sim_matrix = cosine_sim(&embeddings)?;
+        let sim_matrix = similarity_matrix(&embeddings)?;
         assert_eq!(sim_matrix.shape(), [m, m]);
         println!("{:8.16}", sim_matrix);
         Ok(())
@@ -39,11 +43,23 @@ mod tests {
         assert_eq!(embeds_normed.shape(), [2, 5]);
         println!("{:8.16}", embeds_normed);
 
-        let sim_matrix = cosine_sim(&embeds)?;
+        let sim_matrix = similarity_matrix(&embeds)?;
         assert_eq!(sim_matrix.shape(), [2, 2]);
         println!("{:8.16}", sim_matrix);
         Ok(())
     }
+
+    #[test]
+    fn read_safetensors() -> anyhow::Result<()> {
+        let tensor_file = "tests/test_data/superlinear_embeddings/MiniLM-L6-v2/";
+        let splits = load_splits_data(tensor_file)?;
+        let embeddings = load_split_tensor(tensor_file, &splits[0])?;
+        println!("{:8.16}", embeddings);
+        let lx_scores = lexrank_ts(&embeddings, Some(0.25), 10000)?;
+        println!("{:?}", lx_scores);
+        Ok(())
+    }
+
 
 }
 

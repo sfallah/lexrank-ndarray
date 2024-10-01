@@ -1,10 +1,15 @@
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
-use std::ops::{Div, Mul};
-use ndarray::{s, Array, Array1, Array2, Axis};
+use std::cmp::min;
+use std::ops::{Deref, Div, Mul, Sub};
+use std::sync::Arc;
+use ndarray::{s, Array, Array1, Array2, Axis, Ix0};
 use ndarray_rand::rand_distr::Normal;
 use ndarray_rand::RandomExt;
+
+
+pub mod utils;
 
 pub fn get_rand_arr2_f32(
     m: usize,
@@ -31,16 +36,146 @@ pub fn linear_forward(
     Ok(add)
 }
 
+pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<(Array<f32, Ix0>)> {
+    Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
+}
 pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let norm = embeddings.pow2().sum_axis(Axis(1)).sqrt().clamp(1e-12, f32::MAX);
     let normed = embeddings / norm.insert_axis(Axis(1));
     Ok(normed)
 }
 
-pub fn cosine_sim(
+pub fn similarity_matrix(
     embeddings: &Array2<f32>,
 ) -> anyhow::Result<Array2<f32>> {
     let normed = normalize_l2(embeddings)?;
     let sim_matrix = normed.dot(&normed.t());
     Ok(sim_matrix)
 }
+
+pub fn create_markov_matrix_discrete(weights_matrix: &Array2<f32>, threshold: f32) -> anyhow::Result<Array2<f32>> {
+    let discrete_weights_matrix = weights_matrix.mapv(|x| if x >= threshold { 1.0f32 } else { 0.0f32 });
+    create_markov_matrix(&discrete_weights_matrix)
+}
+pub fn create_markov_matrix(weights_matrix: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
+    let min = weights_matrix.flatten().into_iter().reduce(f32::min).unwrap();
+    if min < 0.0 {
+        Ok(softmax(weights_matrix)?)
+    } else {
+        let row_sum = weights_matrix.sum_axis(Axis(1));
+        Ok(weights_matrix / row_sum.insert_axis(Axis(1)))
+    }
+}
+pub fn softmax(weights_matrix: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
+    let max: f32 = weights_matrix.flatten().into_iter().reduce(f32::min).unwrap();
+    let exp_matrix = (weights_matrix - max).exp();
+    let row_sum = exp_matrix.sum_axis(Axis(1));
+    Ok(exp_matrix / row_sum.insert_axis(Axis(1)))
+}
+
+pub fn degree_centrality_scores(
+    similarity_matrix: &Array2<f32>,
+    increase_power: bool,
+    threshold: Option<f32>,
+    max_iter: usize,
+    normalized: bool,
+) -> anyhow::Result<Array1<f32>> {
+    if threshold.is_some() {
+        let threshold = threshold.unwrap();
+        assert!(
+            threshold >= 0.0 && threshold < 1.0,
+            "'threshold' should be a floating-point number from the interval [0, 1) or None"
+        );
+    }
+    let markov_matrix = if let Some(threshold) = threshold {
+        create_markov_matrix_discrete(&similarity_matrix, threshold)?
+    } else {
+        create_markov_matrix(similarity_matrix)?
+    };
+
+    let scores = stationary_distribution(&markov_matrix, increase_power, max_iter, normalized)?;
+
+    Ok(scores)
+}
+
+pub fn stationary_distribution(
+    transition_matrix: &Array2<f32>,
+    increase_power: bool,
+    max_iter: usize,
+    normalized: bool,
+) -> anyhow::Result<Array1<f32>> {
+    let tr_mx_dims = transition_matrix.shape();
+    assert_eq!(
+        tr_mx_dims[0], tr_mx_dims[1],
+        "Transition matrix should be square"
+    );
+
+    let mut distribution = power_method(&transition_matrix, increase_power, max_iter)?;
+
+    if normalized {
+        distribution = distribution / tr_mx_dims[0] as f32;
+    }
+
+    Ok(distribution)
+}
+
+pub fn power_method(
+    transition_matrix: &Array2<f32>,
+    increase_power: bool,
+    max_iter: usize,
+) -> anyhow::Result<Array1<f32>> {
+    let n = transition_matrix.shape()[0];
+
+    let mut eigenvector = Array::ones(n);
+
+    if n == 1 {
+        return Ok(eigenvector);
+    }
+
+    let mut transition: Array2<f32> = transition_matrix.t().to_owned();
+
+    for idx in 0..max_iter {
+        let eigenvector_next = transition.dot(&eigenvector);
+
+        let lm_val: f32 = norm(&eigenvector_next.clone().sub(&eigenvector))?.into_scalar();
+        if lm_val < 1e-5 {
+            return Ok(eigenvector_next);
+        }
+        eigenvector = eigenvector_next;
+
+        if increase_power {
+            transition = transition.clone().dot(&transition);
+        }
+    }
+
+    Ok(eigenvector.into())
+}
+
+pub fn lexrank(
+    embeds: &Vec<Vec<f32>>,
+    threshold: Option<f32>,
+    max_iter: usize,
+) -> anyhow::Result<Vec<(usize, f32)>> {
+    let emebeds_flatten = embeds.iter().flatten().cloned().collect::<Vec<f32>>();
+    let embeds_array: Array2<f32> = Array::from(emebeds_flatten).into_shape_clone((embeds.len(), embeds[0].len()))?;
+    lexrank_ts(&embeds_array, threshold, max_iter)
+}
+
+pub fn lexrank_ts(
+    embeds_array: &Array2<f32>,
+    threshold: Option<f32>,
+    max_iter: usize,
+) -> anyhow::Result<Vec<(usize, f32)>> {
+    let sim_matrix = similarity_matrix(&embeds_array)?;
+    let threshold = threshold.map(|threshold| {
+        let sim_min: f32 = sim_matrix.flatten().into_iter().reduce(f32::min).unwrap();
+        let sim_range = 1f32 - sim_min;
+        sim_min + threshold * sim_range
+    });
+    let scores = degree_centrality_scores(&sim_matrix, false, threshold, max_iter, true)?;
+    let scores_vec: Vec<f32> = scores.flatten().to_vec();
+    let mut ranked_sentences: Vec<_> = (0..embeds_array.shape()[0] as usize).zip(scores_vec).collect();
+    ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    Ok(ranked_sentences)
+}
+

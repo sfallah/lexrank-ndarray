@@ -11,6 +11,11 @@ anyhow = "1.0.44"
 accelerate-src = { version = "0.3.2", optional = true }
 intel-mkl-src = { version = "0.8.1", optional = true }
 blas-src = { version = "0.10", optional = true }
+memmap2 = "0.9.5"
+safetensors = "0.4.5"
+serde_json = "1.0.128"
+serde = { version = "1.0.208", features = ["derive"] }
+rayon = "1.10.0"
 
 
 [dev-dependencies]
