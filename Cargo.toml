@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 ndarray = { version = "0.16.1", features = ["rayon"] }
 ndarray-rand = "0.15.0"
-ndarray-linalg = { version = "0.16.0", features = ["intel-mkl-static"], optional= true }
 
 anyhow = "1.0.44"
 accelerate-src = { version = "0.3.2", optional = true }
@@ -22,7 +21,7 @@ criterion = { version = "0.5.1", default-features = false }
 default = []
 accelerate = ["dep:accelerate-src", "ndarray/blas"]
 blas = ["blas-src/blis","ndarray/blas"]
-mkl = ["dep:intel-mkl-src", "blas-src/intel-mkl", "ndarray/blas", "ndarray-linalg"]
+mkl = ["dep:intel-mkl-src", "blas-src/intel-mkl", "ndarray/blas"]
 
 [[bench]]
 name = "benchmarks"

@@ -1,9 +1,10 @@
-use ndarray::{Array, Array1, Array2};
-use ndarray_rand::rand_distr::Normal;
-use ndarray_rand::RandomExt;
-
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
+
+use std::ops::{Div, Mul};
+use ndarray::{s, Array, Array1, Array2, Axis};
+use ndarray_rand::rand_distr::Normal;
+use ndarray_rand::RandomExt;
 
 pub fn get_rand_arr2_f32(
     m: usize,
@@ -25,7 +26,16 @@ pub fn linear_forward(
     rhs: &Array2<f32>,
     bias: &Array1<f32>,
 ) -> anyhow::Result<Array2<f32>> {
-    let mul = lhs.dot(rhs);
+    let mul = lhs.dot(&rhs.t());
     let add = mul + bias;
     Ok(add)
+}
+
+pub fn cosine_sim(
+    embeddings: &Array2<f32>,
+) -> anyhow::Result<Array2<f32>> {
+    let norm = embeddings.pow2().sum_axis(Axis(1)).sqrt();
+    let normed= embeddings.div(norm.insert_axis(Axis(1)));
+    let sim_matrix = normed.dot(&normed.t());
+    Ok(sim_matrix)
 }
