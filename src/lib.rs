@@ -31,11 +31,16 @@ pub fn linear_forward(
     Ok(add)
 }
 
+pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
+    let norm = embeddings.pow2().sum_axis(Axis(1)).sqrt().clamp(1e-12, f32::MAX);
+    let normed = embeddings / norm.insert_axis(Axis(1));
+    Ok(normed)
+}
+
 pub fn cosine_sim(
     embeddings: &Array2<f32>,
 ) -> anyhow::Result<Array2<f32>> {
-    let norm = embeddings.pow2().sum_axis(Axis(1)).sqrt();
-    let normed= embeddings.div(norm.insert_axis(Axis(1)));
+    let normed = normalize_l2(embeddings)?;
     let sim_matrix = normed.dot(&normed.t());
     Ok(sim_matrix)
 }
