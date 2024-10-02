@@ -1,3 +1,4 @@
+use std::fmt::format;
 use criterion::{black_box, criterion_main, Criterion};
 use ndarray_benches::{similarity_matrix, get_rand_arr1_f32, get_rand_arr2_f32, linear_forward, lexrank_ts};
 use ndarray_benches::utils::{load_split_tensor, load_splits_data};
@@ -36,15 +37,14 @@ pub fn ndarray_cosine_sim(c: &mut Criterion) {
     });
 }
 
-pub fn ndarray_lexrank(c: &mut Criterion) {
-    let tensor_file = "tests/test_data/superlinear_embeddings/MiniLM-L6-v2/";
+pub fn ndarray_lexrank(c: &mut Criterion, tensor_file: &str, dataset: &str) {
     let splits = load_splits_data(tensor_file).unwrap();
     let embeds_vec: Vec<_> = splits.iter().map(|split| load_split_tensor(tensor_file, split).unwrap()).collect();
     println!("embeds_vec {:?}", embeds_vec.len());
     for embed in embeds_vec.iter() {
         println!("embed {:?}", embed.shape());
     }
-    c.bench_function("ndarray_lexrank", |b| {
+    c.bench_function(format!("ndarray_lexrank {}", dataset).as_str(), |b| {
         b.iter(|| {
             embeds_vec.par_iter().for_each(|embed| {
                 let scores = lexrank_ts(embed, Some(0.25), 10000).unwrap();
@@ -59,9 +59,14 @@ pub fn benches() {
         .sample_size(10)
         .measurement_time(std::time::Duration::from_secs(20))
         .configure_from_args();
+    let minilm_embeddings = "tests/test_data/superlinear_embeddings/MiniLM-L6-v2/";
+    ndarray_lexrank(&mut criterion, minilm_embeddings, "MiniLM-L6-v2");
+
+    let bge_m3_embeddings = "tests/test_data/superlinear_embeddings/bge-m3/";
+    ndarray_lexrank(&mut criterion, bge_m3_embeddings, "bge-m3");
+
     //ndarray_cosine_sim(&mut criterion);
     //ndarray_linear_forward(&mut criterion);
-    ndarray_lexrank(&mut criterion);
 }
 
 criterion_main!(benches);
