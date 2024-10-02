@@ -1,12 +1,10 @@
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
-use std::cmp::min;
-use std::ops::{Deref, Div, Mul, Sub};
-use std::sync::Arc;
-use ndarray::{s, Array, Array1, Array2, Axis, Ix0};
+use ndarray::{Array, Array1, Array2, Axis, Ix0};
 use ndarray_rand::rand_distr::Normal;
 use ndarray_rand::RandomExt;
+use std::ops::{Deref, Div, Mul, Sub};
 
 
 pub mod utils;

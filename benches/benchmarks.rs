@@ -22,17 +22,15 @@ pub fn ndarray_linear_forward(c: &mut Criterion) {
     });
 }
 
-pub fn ndarray_cosine_sim(c: &mut Criterion) {
-    let m = 30;
-    let n = 384;
-    let mean = 100.0;
-    let std_dev = 15.0;
-    let embeddings = get_rand_arr2_f32(m, n, mean, std_dev).unwrap();
-    c.bench_function("ndarray_cosine_sim", |b| {
+pub fn ndarray_cosine_sim(c: &mut Criterion, tensor_file: &str, dataset: &str) {
+    let splits = load_splits_data(tensor_file).unwrap();
+    let embeds_vec: Vec<_> = splits.iter().map(|split| load_split_tensor(tensor_file, split).unwrap()).collect();
+    c.bench_function(format!("ndarray_cosine_sim {}", dataset).as_str(), |b| {
         b.iter(|| {
-            let result =
-                similarity_matrix(black_box(&embeddings)).unwrap();
-            black_box(result);
+            embeds_vec.par_iter().for_each(|embed| {
+                let result = similarity_matrix(black_box(embed)).unwrap();
+                black_box(result);
+            });
         });
     });
 }
@@ -60,12 +58,13 @@ pub fn benches() {
         .measurement_time(std::time::Duration::from_secs(20))
         .configure_from_args();
     let minilm_embeddings = "tests/test_data/superlinear_embeddings/MiniLM-L6-v2/";
-    ndarray_lexrank(&mut criterion, minilm_embeddings, "MiniLM-L6-v2");
+    ndarray_cosine_sim(&mut criterion, minilm_embeddings, "MiniLM-L6-v2");
+    //ndarray_lexrank(&mut criterion, minilm_embeddings, "MiniLM-L6-v2");
 
     let bge_m3_embeddings = "tests/test_data/superlinear_embeddings/bge-m3/";
-    ndarray_lexrank(&mut criterion, bge_m3_embeddings, "bge-m3");
+    ndarray_cosine_sim(&mut criterion, bge_m3_embeddings, "bge-m3");
+    //ndarray_lexrank(&mut criterion, bge_m3_embeddings, "bge-m3");
 
-    //ndarray_cosine_sim(&mut criterion);
     //ndarray_linear_forward(&mut criterion);
 }
 
