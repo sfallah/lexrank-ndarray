@@ -40,9 +40,13 @@ pub fn ndarray_lexrank(c: &mut Criterion) {
     let tensor_file = "tests/test_data/superlinear_embeddings/MiniLM-L6-v2/";
     let splits = load_splits_data(tensor_file).unwrap();
     let embeds_vec: Vec<_> = splits.iter().map(|split| load_split_tensor(tensor_file, split).unwrap()).collect();
+    println!("embeds_vec {:?}", embeds_vec.len());
+    for embed in embeds_vec.iter() {
+        println!("embed {:?}", embed.shape());
+    }
     c.bench_function("ndarray_lexrank", |b| {
         b.iter(|| {
-            embeds_vec.iter().for_each(|embed| {
+            embeds_vec.par_iter().for_each(|embed| {
                 let scores = lexrank_ts(embed, Some(0.25), 10000).unwrap();
                 black_box(scores);
             });

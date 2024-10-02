@@ -1,9 +1,8 @@
-
 mod tests {
-
-    use ndarray::{Array, Array1};
+    use ndarray::{array, Array1, Array2};
     use ndarray_benches::{similarity_matrix, get_rand_arr1_f32, get_rand_arr2_f32, linear_forward, normalize_l2, lexrank, lexrank_ts};
     use ndarray_benches::utils::{load_split_tensor, load_splits_data};
+    use ndarray::parallel::prelude::*;
 
 
     #[test]
@@ -20,6 +19,21 @@ mod tests {
 
         assert_eq!(add.shape(), [m, n]);
         println!("{:8.4}", add);
+        Ok(())
+    }
+
+    #[test]
+    fn ndarray_parallel_test() -> anyhow::Result<()> {
+        let a = array![
+                [1.,2.,3.],
+                [4.,5.,6.],
+            ];
+
+        a.flatten().to_owned().into_par_iter().for_each(|x| {
+            println!("{:?}", x);
+        });
+        let min: f32 = *a.flatten().to_owned().into_par_iter().min_by(|arg0, other| f32::partial_cmp(*arg0, *other).unwrap()).unwrap();
+        assert_eq!(min, 1.0);
         Ok(())
     }
 
@@ -59,7 +73,5 @@ mod tests {
         println!("{:?}", lx_scores);
         Ok(())
     }
-
-
 }
 
