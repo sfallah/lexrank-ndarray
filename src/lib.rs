@@ -1,11 +1,12 @@
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
-use ndarray::{Array, Array1, Array2, Axis, Ix0};
+use ndarray::{Array, Array1, Array2, Axis, Ix0, ScalarOperand};
 use ndarray_rand::rand_distr::Normal;
 use ndarray_rand::RandomExt;
 use std::ops::{Deref, Div, Mul, Sub};
-
+use ndarray_rand::rand_distr::num_traits::Pow;
+use ndarray::parallel::prelude::*;
 
 pub mod utils;
 
@@ -33,7 +34,6 @@ pub fn linear_forward(
     let add = mul + bias;
     Ok(add)
 }
-
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<(Array<f32, Ix0>)> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
 }
