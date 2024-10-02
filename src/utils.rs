@@ -39,14 +39,14 @@ pub fn load_split_tensor(
 
 fn buffer_to_vec(buffer: &[u8], rows: usize, cols: usize) -> anyhow::Result<Vec<Vec<f32>>> {
     // Ensure the buffer length matches the expected size
-    let expected_len = rows * cols * std::mem::size_of::<f32>();
+    let expected_len = rows * cols * size_of::<f32>();
     if buffer.len() != expected_len {
         return Err(anyhow::anyhow!("Buffer size does not match the expected dimensions"));
     }
 
     // Convert the buffer to a Vec<f32>
     let flat_vec: Vec<f32> = buffer
-        .chunks_exact(std::mem::size_of::<f32>())
+        .chunks_exact(size_of::<f32>())
         .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
         .collect();
 

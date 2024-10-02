@@ -40,7 +40,7 @@ pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<(Array<f32, Ix0>)> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
 }
 pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
-    let norm = embeddings.pow2().sum_axis(Axis(1)).sqrt().clamp(1e-12, f32::MAX);
+    let norm = embeddings.pow2().sum_axis(Axis(1)).sqrt().clamp(1e-12, f32::INFINITY);
     let normed = embeddings / norm.insert_axis(Axis(1));
     Ok(normed)
 }
@@ -59,18 +59,18 @@ pub fn create_markov_matrix_discrete(weights_matrix: &Array2<f32>, threshold: f3
 }
 pub fn create_markov_matrix(weights_matrix: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let min = weights_matrix.flatten().into_iter().reduce(f32::min).unwrap();
-    if min < 0.0 {
+    if min <= 0.0 {
         Ok(softmax(weights_matrix)?)
     } else {
         let row_sum = weights_matrix.sum_axis(Axis(1));
+        //println!("create_markov_matrix row_sum {:?}", row_sum.shape());
         Ok(weights_matrix / row_sum.insert_axis(Axis(1)))
     }
 }
 pub fn softmax(weights_matrix: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
-    let max: f32 = weights_matrix.flatten().into_iter().reduce(f32::min).unwrap();
-    let exp_matrix = (weights_matrix - max).exp();
-    let row_sum = exp_matrix.sum_axis(Axis(1));
-    Ok(exp_matrix / row_sum.insert_axis(Axis(1)))
+    let exp_vals = weights_matrix.mapv(f32::exp);
+    let exp_sum = exp_vals.sum_axis(Axis(1));
+    Ok(exp_vals / exp_sum.insert_axis(Axis(1)))
 }
 
 pub fn degree_centrality_scores(
@@ -169,6 +169,7 @@ pub fn lexrank_ts(
     let sim_matrix = similarity_matrix(&embeds_array)?;
     let threshold = threshold.map(|threshold| {
         let sim_min: f32 = sim_matrix.flatten().into_iter().reduce(f32::min).unwrap();
+        //println!("sim_min: {:8.16}", sim_min);
         let sim_range = 1f32 - sim_min;
         sim_min + threshold * sim_range
     });

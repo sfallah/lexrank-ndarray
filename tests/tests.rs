@@ -55,7 +55,7 @@ mod tests {
         let splits = load_splits_data(tensor_file)?;
         let embeddings = load_split_tensor(tensor_file, &splits[0])?;
         println!("{:8.16}", embeddings);
-        let lx_scores = lexrank_ts(&embeddings, Some(0.25), 10000)?;
+        let lx_scores = lexrank_ts(&embeddings, None, 10000)?;
         println!("{:?}", lx_scores);
         Ok(())
     }

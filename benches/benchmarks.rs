@@ -42,7 +42,7 @@ pub fn ndarray_lexrank(c: &mut Criterion) {
     let embeds_vec: Vec<_> = splits.iter().map(|split| load_split_tensor(tensor_file, split).unwrap()).collect();
     c.bench_function("ndarray_lexrank", |b| {
         b.iter(|| {
-            embeds_vec.par_iter().for_each(|embed| {
+            embeds_vec.iter().for_each(|embed| {
                 let scores = lexrank_ts(embed, Some(0.25), 10000).unwrap();
                 black_box(scores);
             });
