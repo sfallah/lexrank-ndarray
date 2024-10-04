@@ -27,7 +27,7 @@ criterion = { version = "0.5.1", default-features = false }
 default = []
 benchmarks = ["ndarray-rand", "memmap2", "safetensors", "serde_json", "serde"]
 accelerate = ["accelerate-src", "blas-src/accelerate", "ndarray/blas"]
-blas = ["blas-src", "blas-src/blis", "ndarray/blas"]
+blas = ["blis-src", "blas-src/blis", "ndarray/blas"]
 mkl = ["intel-mkl-src", "blas-src/intel-mkl", "ndarray/blas"]
 
 
