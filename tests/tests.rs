@@ -1,8 +1,8 @@
 #[cfg(test)]
 pub mod tests {
+    use lexrank_ndarray::testing::{get_rand_arr2_f32, load_split_tensor, load_splits_data};
+    use lexrank_ndarray::{lexrank_ts, normalize_l2, similarity_matrix};
     use ndarray::{array, Array1};
-    use ndarray_benches::utils::{get_rand_arr2_f32, load_split_tensor, load_splits_data};
-    use ndarray_benches::{lexrank_ts, normalize_l2, similarity_matrix};
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {

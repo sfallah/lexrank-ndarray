@@ -40,17 +40,6 @@ pub fn load_split_vec(
     let ts_vec = buffer_to_vec(&tensor.data(), shape[0], shape[1])?;
     Ok((shape.to_vec(), ts_vec))
 }
-pub fn array2_from_vec(vec: &Vec<f32>, shape: &Vec<usize>) -> anyhow::Result<Array2<f32>> {
-    if shape.len() != 2 {
-        return Err(anyhow::anyhow!("Shape must have 2 dimensions"));
-    }
-    let rows = shape[0];
-    let cols = shape[1];
-    let array: Array2<f32> = Array::from(vec.to_owned())
-        .into_shape_clone((rows, cols))?
-        .to_owned();
-    Ok(array)
-}
 
 pub fn load_split_tensor(data_path: &str, split_data: &SplitData) -> anyhow::Result<Array2<f32>> {
     let (shape, vec) = load_split_vec(data_path, split_data)?;
@@ -86,7 +75,14 @@ pub fn get_rand_arr2_f32(
     Ok(rnd_arr)
 }
 
-pub fn get_rand_arr1_f32(n: usize, mean: f32, std_dev: f32) -> anyhow::Result<Array1<f32>> {
-    let rnd_arr = Array::random(n, Normal::new(mean, std_dev)?).into();
-    Ok(rnd_arr)
+pub fn array2_from_vec(vec: &Vec<f32>, shape: &Vec<usize>) -> anyhow::Result<Array2<f32>> {
+    if shape.len() != 2 {
+        return Err(anyhow::anyhow!("Shape must have 2 dimensions"));
+    }
+    let rows = shape[0];
+    let cols = shape[1];
+    let array: Array2<f32> = Array::from(vec.to_owned())
+        .into_shape_clone((rows, cols))?
+        .to_owned();
+    Ok(array)
 }

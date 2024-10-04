@@ -1,8 +1,8 @@
 use criterion::{black_box, criterion_main, Criterion};
-use ndarray_benches::utils::{
+use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
-use ndarray_benches::{lexrank_ts, normalize_l2, similarity_matrix};
+use lexrank_ndarray::{lexrank_ts, normalize_l2, similarity_matrix};
 use rayon::prelude::*;
 
 pub fn ndarray_normalize_l2(c: &mut Criterion, dataset: &str, tensor_file: &str) {
