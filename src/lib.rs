@@ -1,62 +1,42 @@
-#[cfg(feature = "mkl")]
-extern crate intel_mkl_src;
+use ndarray::{Array, Array1, Array2, Axis, Ix0};
+use std::ops::Sub;
 
-use ndarray::{Array, Array1, Array2, Axis, Ix0, ScalarOperand};
-use ndarray_rand::rand_distr::Normal;
-use ndarray_rand::RandomExt;
-use std::ops::{Deref, Div, Mul, Sub};
-use ndarray_rand::rand_distr::num_traits::Pow;
-use ndarray::parallel::prelude::*;
-
+#[cfg(any(test, feature = "benchmarks"))]
 pub mod utils;
 
-pub fn get_rand_arr2_f32(
-    m: usize,
-    n: usize,
-    mean: f32,
-    std_dev: f32,
-) -> anyhow::Result<Array2<f32>> {
-    let rnd_arr = Array::random((m, n), Normal::new(mean, std_dev)?).into();
-    Ok(rnd_arr)
-}
-
-pub fn get_rand_arr1_f32(n: usize, mean: f32, std_dev: f32) -> anyhow::Result<Array1<f32>> {
-    let rnd_arr = Array::random(n, Normal::new(mean, std_dev)?).into();
-    Ok(rnd_arr)
-}
-
-pub fn linear_forward(
-    lhs: &Array2<f32>,
-    rhs: &Array2<f32>,
-    bias: &Array1<f32>,
-) -> anyhow::Result<Array2<f32>> {
-    let mul = lhs.dot(&rhs.t());
-    let add = mul + bias;
-    Ok(add)
-}
-pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<(Array<f32, Ix0>)> {
+pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
 }
 pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
-    let norm = embeddings.pow2().sum_axis(Axis(1)).sqrt().clamp(1e-12, f32::INFINITY);
+    let norm = embeddings
+        .pow2()
+        .sum_axis(Axis(1))
+        .sqrt()
+        .clamp(1e-12, f32::INFINITY);
     let normed = embeddings / norm.insert_axis(Axis(1));
     Ok(normed)
 }
 
-pub fn similarity_matrix(
-    embeddings: &Array2<f32>,
-) -> anyhow::Result<Array2<f32>> {
+pub fn similarity_matrix(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let normed = normalize_l2(embeddings)?;
     let sim_matrix = normed.dot(&normed.t());
     Ok(sim_matrix)
 }
 
-pub fn create_markov_matrix_discrete(weights_matrix: &Array2<f32>, threshold: f32) -> anyhow::Result<Array2<f32>> {
-    let discrete_weights_matrix = weights_matrix.mapv(|x| if x >= threshold { 1.0f32 } else { 0.0f32 });
+pub fn create_markov_matrix_discrete(
+    weights_matrix: &Array2<f32>,
+    threshold: f32,
+) -> anyhow::Result<Array2<f32>> {
+    let discrete_weights_matrix =
+        weights_matrix.mapv(|x| if x >= threshold { 1.0f32 } else { 0.0f32 });
     create_markov_matrix(&discrete_weights_matrix)
 }
 pub fn create_markov_matrix(weights_matrix: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
-    let min = weights_matrix.flatten().into_iter().reduce(f32::min).unwrap();
+    let min = weights_matrix
+        .flatten()
+        .into_iter()
+        .reduce(f32::min)
+        .unwrap();
     if min <= 0.0 {
         Ok(softmax(weights_matrix)?)
     } else {
@@ -132,7 +112,7 @@ pub fn power_method(
 
     let mut transition: Array2<f32> = transition_matrix.t().to_owned();
 
-    for idx in 0..max_iter {
+    for _idx in 0..max_iter {
         let eigenvector_next = transition.dot(&eigenvector);
 
         let lm_val: f32 = norm(&eigenvector_next.clone().sub(&eigenvector))?.into_scalar();
@@ -155,7 +135,8 @@ pub fn lexrank(
     max_iter: usize,
 ) -> anyhow::Result<Vec<(usize, f32)>> {
     let emebeds_flatten = embeds.iter().flatten().cloned().collect::<Vec<f32>>();
-    let embeds_array: Array2<f32> = Array::from(emebeds_flatten).into_shape_clone((embeds.len(), embeds[0].len()))?;
+    let embeds_array: Array2<f32> =
+        Array::from(emebeds_flatten).into_shape_clone((embeds.len(), embeds[0].len()))?;
     lexrank_ts(&embeds_array, threshold, max_iter)
 }
 
@@ -173,8 +154,9 @@ pub fn lexrank_ts(
     });
     let scores = degree_centrality_scores(&sim_matrix, false, threshold, max_iter, true)?;
     let scores_vec: Vec<f32> = scores.flatten().to_vec();
-    let mut ranked_sentences: Vec<_> = (0..embeds_array.shape()[0] as usize).zip(scores_vec).collect();
+    let mut ranked_sentences: Vec<_> = (0..embeds_array.shape()[0] as usize)
+        .zip(scores_vec)
+        .collect();
     ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     Ok(ranked_sentences)
 }
-

@@ -1,41 +1,8 @@
-mod tests {
-    use ndarray::{array, Array1, Axis};
-    use ndarray_benches::{similarity_matrix, get_rand_arr1_f32, get_rand_arr2_f32, linear_forward, normalize_l2, lexrank, lexrank_ts};
-    use ndarray_benches::utils::{load_split_tensor, load_splits_data};
-    use ndarray::parallel::prelude::*;
-    use ndarray_rand::rand_distr::num_traits::Pow;
-
-    #[test]
-    fn ndarray_matmul() -> anyhow::Result<()> {
-        let m = 16;
-        let n = 384;
-        let k = 1536;
-        let mean = 100.0;
-        let std_dev = 15.0;
-        let lhs = get_rand_arr2_f32(m, k, mean, std_dev)?;
-        let rhs = get_rand_arr2_f32(n, k, mean, std_dev)?;
-        let bias = get_rand_arr1_f32(n, mean, std_dev)?;
-        let add = linear_forward(&lhs, &rhs, &bias)?;
-
-        assert_eq!(add.shape(), [m, n]);
-        println!("{:8.4}", add);
-        Ok(())
-    }
-
-    #[test]
-    fn ndarray_parallel_test() -> anyhow::Result<()> {
-        let a = array![
-                [1.,2.,3.],
-                [4.,5.,6.],
-            ];
-
-        a.flatten().to_owned().into_par_iter().for_each(|x| {
-            println!("{:?}", x);
-        });
-        let min: f32 = *a.flatten().to_owned().into_par_iter().min_by(|arg0, other| f32::partial_cmp(*arg0, *other).unwrap()).unwrap();
-        assert_eq!(min, 1.0);
-        Ok(())
-    }
+#[cfg(test)]
+pub mod tests {
+    use ndarray::{array, Array1};
+    use ndarray_benches::utils::{get_rand_arr2_f32, load_split_tensor, load_splits_data};
+    use ndarray_benches::{lexrank_ts, normalize_l2, similarity_matrix};
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
@@ -112,44 +79,12 @@ mod tests {
 
         Ok(())
     }
-    #[test]
-    fn pow_test() -> anyhow::Result<()> {
-        let a = array![
-            [1.0f32, 2., 3.],
-            [4., 5., 6.],
-        ];
-        let b = a.mapv(|x| x.pow(2.0));
-        println!("{:8.3}", b);
-
-
-
-        let c = a.pow2();
-        println!("{:8.3}", c);
-        let c_norm = c.sum_axis(Axis(1)).sqrt();
-        println!("c_norm: {:8.7}", c_norm);
-
-
-        let mut d = array![
-            [1.0f32, 2., 3.],
-            [4., 5., 6.],
-        ];
-        d.par_mapv_inplace(|x| x.pow(2.0f32));
-        println!("{:8.3}", d);
-
-        let d_norm = d.sum_axis(Axis(1)).sqrt();
-        println!("d_norm: {:8.7}", d_norm);
-        Ok(())
-    }
 
     #[test]
     fn normalize_l2_test() -> anyhow::Result<()> {
-        let a = array![
-            [1.0f32, 2., 3.],
-            [4., 5., 6.],
-        ];
+        let a = array![[1.0f32, 2., 3.], [4., 5., 6.],];
         let normed = normalize_l2(&a)?;
         println!("{:8.12}", normed);
         Ok(())
     }
 }
-
