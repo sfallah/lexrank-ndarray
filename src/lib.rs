@@ -4,6 +4,13 @@ use std::ops::Sub;
 #[cfg(any(test, feature = "benchmarks"))]
 pub mod utils;
 
+#[cfg(feature = "mkl")]
+extern crate intel_mkl_src;
+#[cfg(feature = "accelerate")]
+extern crate accelerate_src;
+#[cfg(feature = "blas")]
+extern crate blis_src;
+
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
 }

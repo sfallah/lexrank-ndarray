@@ -732,9 +732,12 @@ dependencies = [
 name = "ndarray-benches"
 version = "0.1.0"
 dependencies = [
+ "accelerate-src",
  "anyhow",
  "blas-src",
+ "blis-src",
  "criterion",
+ "intel-mkl-src",
  "memmap2",
  "ndarray",
  "ndarray-rand",
