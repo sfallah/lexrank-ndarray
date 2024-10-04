@@ -31,7 +31,9 @@ blas = ["blis-src", "blas-src/blis", "ndarray/blas"]
 mkl = ["intel-mkl-src", "blas-src/intel-mkl", "ndarray/blas"]
 testing = ["ndarray-rand", "memmap2", "safetensors", "serde_json", "serde"]
 
-
+[[test]]
+name = "tests"
+required-features = ["testing"]
 
 
 [[bench]]
