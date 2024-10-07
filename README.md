@@ -6,3 +6,6 @@ cargo bench --features testing
 
 tests with  
 cargo test --test tests --features testing
+
+create python library by running
+maturin develop --release
