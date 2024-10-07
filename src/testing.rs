@@ -1,11 +1,12 @@
 use memmap2::MmapOptions;
-use ndarray::{Array, Array1, Array2};
+use ndarray::{Array, Array2};
 use ndarray_rand::rand_distr::Normal;
 use ndarray_rand::RandomExt;
 use safetensors::SafeTensors;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::fs::File;
+use std::mem::size_of;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SplitData {
