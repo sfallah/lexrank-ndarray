@@ -1,11 +1,23 @@
-Efficient lexrank for extractive summarizations based on sentence centrality,
-using ndarray.
+# Efficient LexRank for Extractive Summarization
 
-you can run benchmarks with 
+This implementation of LexRank focuses on efficient extractive summarization based on **sentence centrality**, utilizing **ndarray** for performance optimization.
+
+## Usage
+
+### Benchmarks
+Run benchmarks using the following command:
+```bash
 cargo bench --features testing
+```
 
-tests with  
+### Tests
+Execute tests with:
+```bash
 cargo test --test tests --features testing
+```
 
-create python library by running
-maturin develop --release
+### Python Library
+To create the Python library, run:
+```bash
+maturin develop --release --features extension-module
+```
