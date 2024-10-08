@@ -11,6 +11,7 @@ extern crate blis_src;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
+#[cfg(feature = "extension-module")]
 pub mod py_binding;
 
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {
