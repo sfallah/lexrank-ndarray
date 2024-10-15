@@ -137,22 +137,28 @@ pub fn power_method(
 }
 
 pub fn lexrank(
-    embeds: &Vec<Vec<f32>>,
+    embeddings: &Vec<Vec<f32>>,
     threshold: Option<f32>,
     max_iter: usize,
 ) -> anyhow::Result<Vec<(usize, f32)>> {
-    let emebeds_flatten = embeds.iter().flatten().cloned().collect::<Vec<f32>>();
-    let embeds_array: Array2<f32> =
-        Array::from(emebeds_flatten).into_shape_clone((embeds.len(), embeds[0].len()))?;
-    lexrank_ts(&embeds_array, threshold, max_iter)
+    if embeddings.is_empty() {
+        return Ok(vec![]);
+    }
+    let embeddings_flatten: Vec<f32> = embeddings.iter().flatten().cloned().collect();
+    let embeddings_array: Array2<f32> =
+        Array::from(embeddings_flatten).into_shape_clone((embeddings.len(), embeddings[0].len()))?;
+    lexrank_ts(&embeddings_array, threshold, max_iter)
 }
 
 pub fn lexrank_ts(
-    embeds_array: &Array2<f32>,
+    embeddings_array: &Array2<f32>,
     threshold: Option<f32>,
     max_iter: usize,
 ) -> anyhow::Result<Vec<(usize, f32)>> {
-    let sim_matrix = similarity_matrix(&embeds_array)?;
+    if embeddings_array.shape()[0] == 0 {
+        return Ok(vec![]);
+    }
+    let sim_matrix = similarity_matrix(&embeddings_array)?;
     let threshold = threshold.map(|threshold| {
         let sim_min: f32 = sim_matrix.flatten().into_iter().reduce(f32::min).unwrap();
         //println!("sim_min: {:8.16}", sim_min);
@@ -161,7 +167,7 @@ pub fn lexrank_ts(
     });
     let scores = degree_centrality_scores(&sim_matrix, false, threshold, max_iter, true)?;
     let scores_vec: Vec<f32> = scores.flatten().to_vec();
-    let mut ranked_sentences: Vec<_> = (0..embeds_array.shape()[0] as usize)
+    let mut ranked_sentences: Vec<_> = (0..embeddings_array.shape()[0] as usize)
         .zip(scores_vec)
         .collect();
     ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
