@@ -1,7 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::exceptions;
 use ndarray::Array2;
-//use crate::lexrank_ndarray::{lexrank_ts, normalize_l2, similarity_matrix};
 use crate::lexrank_ts;
 
 #[pyfunction]
