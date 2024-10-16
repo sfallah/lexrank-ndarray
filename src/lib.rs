@@ -48,8 +48,8 @@ pub fn cos_similarity(
     }
     let array1: Array1<f32> = Array::from(embedding1.to_vec());
     let array2: Array1<f32> = Array::from(embedding2.to_vec());
-    let normed1 = array1.clone() / norm(&array1)?;
-    let normed2 = array2.clone() / norm(&array2)?;
+    let normed1 = array1.clone() / norm(&array1)?.clamp(1e-12, f32::INFINITY);
+    let normed2 = array2.clone() / norm(&array2)?.clamp(1e-12, f32::INFINITY);
     let sim = normed1.dot(&normed2.t());
     Ok(sim)
 }
