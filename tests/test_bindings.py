@@ -1,7 +1,12 @@
 import lexrank_ndarray
 import numpy as np
 
-def main():
+def test_lexrank_py():
+    """
+    Test the lexrank_py function from the lexrank_ndarray module.
+    Computes LexRank scores for sample embeddings.
+    """
+
     # Sample embedding
     num_sentences = 10
     embedding_dim = 300  
@@ -26,6 +31,34 @@ def main():
 
     except Exception as e:
         print(f"An error occurred: {e}")
+
+def test_cosine_similarity_py():
+    """
+    Test the cos_similarity_py function from the lexrank_ndarray module.
+    Computes cosine similarity between two sample embeddings.
+    """
+    # Generate two sample embeddings
+    embedding1 = np.random.rand(300).astype(np.float32).tolist()
+    embedding2 = np.random.rand(300).astype(np.float32).tolist()
+
+    print("\nTesting cos_similarity_py with two random embeddings...")
+    try:
+        # Call the cos_similarity_py function
+        similarity = lexrank_ndarray.cos_similarity_py(embedding1, embedding2)
+
+        # Display the cosine similarity
+        print(f"Cosine Similarity: {similarity:.6f}")
+
+    except Exception as e:
+        print(f"An error occurred during cos_similarity_py test: {e}")
+
+
+def main():
+    """
+    Main function to execute all tests.
+    """
+    test_lexrank_py()
+    test_cosine_similarity_py()
 
 if __name__ == "__main__":
     main()

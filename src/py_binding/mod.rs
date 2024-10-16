@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::exceptions;
 use ndarray::Array2;
+//use crate::lexrank_ndarray::{lexrank_ts, normalize_l2, similarity_matrix};
 use crate::lexrank_ts;
 use crate::cos_similarity;
 
@@ -53,7 +54,7 @@ fn cos_similarity_py(
 }
 
 #[pymodule]
-fn py_binding(_py: Python, m: &PyModule) -> PyResult<()> {
+fn lexrank_ndarray(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(lexrank_py, m)?)?;
     m.add_function(wrap_pyfunction!(cos_similarity_py, m)?)?;
     Ok(())
