@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 use pyo3::exceptions;
 use ndarray::Array2;
 use crate::lexrank_ts;
+use crate::cos_similarity;
 
 #[pyfunction]
 fn lexrank_py(
@@ -35,9 +36,25 @@ fn lexrank_py(
     }
 }
 
+#[pyfunction]
+fn cos_similarity_py(
+    embedding1: Vec<f32>,
+    embedding2: Vec<f32>,
+) -> PyResult<f32> {
+    cos_similarity(&embedding1, &embedding2)
+        .map_err(|e| {
+            // Determine the type of error and map to appropriate Python exception
+            if e.to_string().contains("Empty embeddings") || e.to_string().contains("different shapes") || e.to_string().contains("too close to zero") {
+                exceptions::PyValueError::new_err(e.to_string())
+            } else {
+                exceptions::PyRuntimeError::new_err(e.to_string())
+            }
+        })
+}
+
 #[pymodule]
-fn lexrank_ndarray(_py: Python, m: &PyModule) -> PyResult<()> {
+fn py_binding(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(lexrank_py, m)?)?;
-    // Add more functions as needed
+    m.add_function(wrap_pyfunction!(cos_similarity_py, m)?)?;
     Ok(())
 }
