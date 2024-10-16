@@ -21,3 +21,9 @@ To create the Python library, run:
 ```bash
 maturin develop --release --features extension-module
 ```
+
+After that feel free to check it if runs correctly with
+
+```bash
+python tests/test_bindings.py 
+```
