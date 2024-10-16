@@ -1,8 +1,9 @@
 #[cfg(test)]
 pub mod tests {
-    use lexrank_ndarray::testing::{get_rand_arr2_f32, load_split_tensor, load_splits_data};
-    use lexrank_ndarray::{lexrank_ts, normalize_l2, similarity_matrix};
+    use lexrank_ndarray::testing::{get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data};
+    use lexrank_ndarray::{cos_similarity, lexrank_ts, normalize_l2, similarity_matrix};
     use ndarray::{array, Array1};
+    use ndarray_rand::rand_distr::num_traits::abs;
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
@@ -27,6 +28,21 @@ pub mod tests {
         let sim_matrix = similarity_matrix(&mut embeds)?;
         assert_eq!(sim_matrix.shape(), [2, 2]);
         println!("{:8.16}", sim_matrix);
+        Ok(())
+    }
+
+    #[test]
+    fn pair_cos_similarity() -> anyhow::Result<()> {
+        let embed1_array = get_rand_arr1_f32(384, 0.0, 1.0)?;
+        let embed2_array = get_rand_arr1_f32(384, 0.0, 1.0)?;
+
+        let embed1 = embed1_array.flatten().to_vec();
+        let embed2 = embed2_array.flatten().to_vec();
+        let sim = cos_similarity(&embed1, &embed2)?;
+        println!("{:8.16}", sim);
+        let sim = cos_similarity(&embed1, &embed1)?;
+        println!("{:8.16}", sim);
+        assert!(abs(1.0 - abs(sim)) < 1e-6);
         Ok(())
     }
 

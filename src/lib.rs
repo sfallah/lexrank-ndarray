@@ -30,6 +30,30 @@ pub fn similarity_matrix(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>
     Ok(sim_matrix)
 }
 
+pub fn cos_similarity(
+    embedding1: &Vec<f32>,
+    embedding2: &Vec<f32>,
+) -> anyhow::Result<f32> {
+    if embedding1.is_empty() || embedding2.is_empty() {
+        return Err(anyhow::anyhow!("Empty embeddings"));
+    }
+    let embed1_shape = embedding1.len();
+    let embed2_shape = embedding2.len();
+    if embed1_shape != embed2_shape {
+        return Err(anyhow::anyhow!(
+            "Embeddings have different shapes: {} != {}",
+            embed1_shape,
+            embed2_shape
+        ));
+    }
+    let array1: Array1<f32> = Array::from(embedding1.to_vec());
+    let array2: Array1<f32> = Array::from(embedding2.to_vec());
+    let normed1 = array1.clone() / norm(&array1)?;
+    let normed2 = array2.clone() / norm(&array2)?;
+    let sim = normed1.dot(&normed2.t());
+    Ok(sim)
+}
+
 pub fn create_markov_matrix_discrete(
     weights_matrix: &Array2<f32>,
     threshold: f32,
@@ -149,6 +173,22 @@ pub fn lexrank(
         Array::from(embeddings_flatten).into_shape_clone((embeddings.len(), embeddings[0].len()))?;
     lexrank_ts(&embeddings_array, threshold, max_iter)
 }
+
+pub fn lexrank_array(
+    embeddings: &Vec<f32>,
+    no_seq: usize,
+    embed_dim: usize,
+    threshold: Option<f32>,
+    max_iter: usize,
+) -> anyhow::Result<Vec<(usize, f32)>> {
+    if embeddings.is_empty() {
+        return Ok(vec![]);
+    }
+    let embeddings_array: Array2<f32> =
+        Array::from(embeddings.to_vec()).into_shape_clone((no_seq, embed_dim))?;
+    lexrank_ts(&embeddings_array, threshold, max_iter)
+}
+
 
 pub fn lexrank_ts(
     embeddings_array: &Array2<f32>,
