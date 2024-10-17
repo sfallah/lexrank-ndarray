@@ -1,9 +1,8 @@
 #[cfg(test)]
 pub mod tests {
-    use lexrank_ndarray::testing::{get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data};
+    use lexrank_ndarray::testing::{f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data};
     use lexrank_ndarray::{cos_similarity, lexrank_ts, normalize_l2, similarity_matrix};
-    use ndarray::{array, Array1};
-    use ndarray_rand::rand_distr::num_traits::abs;
+    use ndarray::{array, Array1, Axis};
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
@@ -32,17 +31,45 @@ pub mod tests {
     }
 
     #[test]
+    fn test_f32_close() {
+        let a = 1.0;
+        let b = 1.0001;
+        let r_tol = 0.001;
+        assert!(f32_close(a, b, r_tol));
+
+        let a = 1.0;
+        let b = 1.1;
+        let r_tol = 0.001;
+        assert!(!f32_close(a, b, r_tol));
+
+        let a = -0.08510615;
+        let b = -0.08510614;
+        let r_tol = 1e-6;
+        assert!(f32_close(a, b, r_tol));
+    }
+
+    #[test]
     fn pair_cos_similarity() -> anyhow::Result<()> {
         let embed1_array = get_rand_arr1_f32(384, 0.0, 1.0)?;
         let embed2_array = get_rand_arr1_f32(384, 0.0, 1.0)?;
 
         let embed1 = embed1_array.flatten().to_vec();
         let embed2 = embed2_array.flatten().to_vec();
-        let sim = cos_similarity(&embed1, &embed2)?;
-        println!("{:8.16}", sim);
-        let sim = cos_similarity(&embed1, &embed1)?;
-        println!("{:8.16}", sim);
-        assert!(abs(1.0 - abs(sim)) < 1e-6);
+        let pair_sim = cos_similarity(&embed1, &embed2)?;
+        println!("Pair sim: {:8.16}", pair_sim);
+        let self_sim = cos_similarity(&embed1, &embed1)?;
+        println!("Self sim: {:8.16}", self_sim);
+        assert!(f32_close(1.0, self_sim, 1e-6));
+
+        let mut embed1_array = embed1_array.into_shape_with_order((1, 384))?;
+        let embed2_array = embed2_array.into_shape_with_order((1, 384))?;
+
+        embed1_array.append(Axis(0), embed2_array.view())?;
+        let sim_matrix = similarity_matrix(&embed1_array)?;
+        let pair_sim_mx = sim_matrix.get((0, 1)).unwrap();
+        println!("MX  sim: {:8.16}", pair_sim_mx);
+        assert!(f32_close(pair_sim, *pair_sim_mx, 1e-6));
+
         Ok(())
     }
 

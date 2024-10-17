@@ -95,3 +95,7 @@ pub fn array2_from_vec(vec: &Vec<f32>, shape: &Vec<usize>) -> anyhow::Result<Arr
         .to_owned();
     Ok(array)
 }
+
+pub fn f32_close(a: f32, b: f32, r_tol: f32) -> bool {
+    (a.abs() - b.abs()).abs() < r_tol
+}
