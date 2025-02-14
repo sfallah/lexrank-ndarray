@@ -1,8 +1,10 @@
+use std::thread;
+use std::time::{Duration, Instant};
 use criterion::{black_box, criterion_main, Criterion};
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
-use lexrank_ndarray::{lexrank_ts, normalize_l2, similarity_matrix};
+use lexrank_ndarray::{lexrank_array, normalize_l2, similarity_matrix};
 use rayon::prelude::*;
 
 pub fn ndarray_normalize_l2(c: &mut Criterion, dataset: &str, tensor_file: &str) {
@@ -43,16 +45,28 @@ pub fn ndarray_lexrank(c: &mut Criterion, dataset: &str, tensor_file: &str) {
         .iter()
         .map(|split| load_split_tensor(tensor_file, split).unwrap())
         .collect();
+    let embeds_vec: Vec<_> = embeds_vec.iter().map(|embed| {
+        let embed_flatten: Vec<f32> = embed.flatten().to_vec();
+        let shape = embed.shape();
+        (embed_flatten, shape[0], shape[1])
+    }).collect();
     println!("embeds_vec {:?}", embeds_vec.len());
-    for embed in embeds_vec.iter() {
-        println!("embed {:?}", embed.shape());
-    }
     c.bench_function(format!("ndarray_lexrank {}", dataset).as_str(), |b| {
-        b.iter(|| {
-            embeds_vec.par_iter().for_each(|embed| {
-                let scores = lexrank_ts(embed, Some(0.25), 10000).unwrap();
-                black_box(scores);
-            });
+        b.iter_custom(|iters| {
+            let value = embeds_vec.clone();
+            thread::spawn(move || {
+                let mut duration = Duration::new(0, 0);
+                for _ in 0..iters {
+                    let start = Instant::now();
+                    value.par_iter().for_each(|(embed, no_seq, embd_dim)| {
+                        let scores = lexrank_array(embed, *no_seq, *embd_dim, None, 10000).unwrap();
+                        black_box(scores);
+                    });
+                    let elapsed = start.elapsed();
+                    duration = duration.checked_add(elapsed).unwrap();
+                }
+                duration
+            }).join().unwrap()
         });
     });
 }
