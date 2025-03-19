@@ -88,9 +88,9 @@ pub mod tests {
 
     #[test]
     fn superlinear_summary() -> anyhow::Result<()> {
-        let test_data_path = "tests/test_data/superlinear_embeddings/MiniLM-L6-v2";
-        //let test_data_path = "tests/test_data/superlinear_embeddings/multilingual-e5-large-instruct";
-        //let test_data_path = "tests/test_data/superlinear_embeddings/bge-m3";
+        //let test_data_path = "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2";
+        //let test_data_path = "tests/test_data/superlinear_embeddings/snowflake-arctic-embed-m-v1.5";
+        let test_data_path = "tests/test_data/superlinear_embeddings/gte-Qwen2-1.5B-instruct";
 
         let splits_data = load_splits_data(&test_data_path)?;
         println!("{:?}", splits_data.len());
@@ -100,9 +100,9 @@ pub mod tests {
                 split_data.split_id
             );
             println!("{:?}", split_data.no_tokens);
-            println!("{:?}", split_data.embeddings_tensors_file);
+            println!("{:?}", split_data.sentence_embeddings_file);
             let tensor = load_split_tensor(&test_data_path, &split_data)?;
-            let lx_rank = lexrank_ts(&tensor, Some(0.3), 10000)?;
+            let lx_rank = lexrank_ts(&tensor, None, 10000)?;
             let lx_rank_str = lx_rank
                 .iter()
                 .map(|(idx, score)| format!("{:?}: {:.16}", idx, score))

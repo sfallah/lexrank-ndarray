@@ -12,8 +12,8 @@ pub struct SplitData {
     pub split_id: usize,
     pub no_tokens: usize,
     pub split_string: String,
-    pub embeddings_tensors_file: String,
-    pub embeddings_tensors_name: String,
+    pub sentence_embeddings_file: String,
+    pub sentence_embeddings_name: String,
     pub sentences: Vec<String>,
 }
 
@@ -28,7 +28,7 @@ pub fn load_split_vec(
     data_path: &str,
     split_data: &SplitData,
 ) -> anyhow::Result<(Vec<usize>, Vec<f32>)> {
-    let tensor_file = format!("{}/{}", data_path, split_data.embeddings_tensors_file);
+    let tensor_file = format!("{}/{}", data_path, split_data.sentence_embeddings_file);
     let file = File::open(tensor_file).expect("Failed to open file.");
     let buffer = unsafe { MmapOptions::new().map(&file)? };
     let (_, tensor) = SafeTensors::deserialize(&buffer)?
@@ -43,6 +43,7 @@ pub fn load_split_vec(
 
 pub fn load_split_tensor(data_path: &str, split_data: &SplitData) -> anyhow::Result<Array2<f32>> {
     let (shape, vec) = load_split_vec(data_path, split_data)?;
+    println!("Embeddings dims: {:?}", shape);
     let array = array2_from_vec(&vec, &shape)?;
     Ok(array)
 }
@@ -93,6 +94,7 @@ pub fn array2_from_vec(vec: &Vec<f32>, shape: &Vec<usize>) -> anyhow::Result<Arr
     let array: Array2<f32> = Array::from(vec.to_owned())
         .into_shape_clone((rows, cols))?
         .to_owned();
+    //println!("{:?}", array);
     Ok(array)
 }
 
