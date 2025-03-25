@@ -90,6 +90,7 @@ pub mod tests {
     fn superlinear_summary() -> anyhow::Result<()> {
         //let test_data_path = "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2";
         //let test_data_path = "tests/test_data/superlinear_embeddings/snowflake-arctic-embed-m-v1.5";
+        //let test_data_path = "tests/test_data/superlinear_embeddings/bge-reranker-v2";
         let test_data_path = "tests/test_data/superlinear_embeddings/gte-Qwen2-1.5B-instruct";
 
         let splits_data = load_splits_data(&test_data_path)?;
