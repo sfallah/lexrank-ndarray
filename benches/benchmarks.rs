@@ -64,10 +64,10 @@ use simsimd::SpatialSimilarity;
 
 fn simsimd_similarity_matrix(embeddings: &Vec<Vec<f32>>) -> Vec<Vec<f64>> {
     embeddings
-        .iter()
+        .par_iter()
         .map(|embed| {
             embeddings
-                .iter()
+                .par_iter()
                 .map(|other| f32::cosine(embed, other).unwrap())
                 .collect::<Vec<f64>>()
         })
