@@ -27,13 +27,15 @@ pub fn ndarray_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
     let splits = load_splits_data(tensor_file).unwrap();
     let embeds_vec: Vec<_> = splits
         .iter()
-        .map(|split| load_split_vec(tensor_file, split).unwrap())
+        .map(|split| {
+            let (shape, vec) = load_split_vec(tensor_file, split).unwrap();
+            array2_from_vec(&vec, &shape).unwrap()
+        })
         .collect();
     c.bench_function(format!("ndarray_cosine_sim {}", dataset).as_str(), |b| {
         b.iter(|| {
-            embeds_vec.par_iter().for_each(|(shape, vec)| {
-                let embeddings = array2_from_vec(vec, shape).unwrap();
-                let result = similarity_matrix(black_box(&embeddings)).unwrap();
+            embeds_vec.par_iter().for_each(|embeddings| {
+                let result = similarity_matrix(black_box(embeddings)).unwrap();
                 black_box(result);
             });
         });
@@ -64,10 +66,10 @@ use simsimd::SpatialSimilarity;
 
 fn simsimd_similarity_matrix(embeddings: &Vec<Vec<f32>>) -> Vec<Vec<f64>> {
     embeddings
-        .par_iter()
+        .iter()
         .map(|embed| {
             embeddings
-                .par_iter()
+                .iter()
                 .map(|other| f32::cosine(embed, other).unwrap())
                 .collect::<Vec<f64>>()
         })
