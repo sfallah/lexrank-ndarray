@@ -23,6 +23,7 @@ serde = { version = "1.0.208", features = ["derive"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", default-features = false }
+simsimd = "6.4.2"
 
 [features]
 default = []
@@ -38,4 +39,5 @@ required-features = ["testing"]
 
 [[bench]]
 name = "benchmarks"
+required-features = ["testing"]
 harness = false
