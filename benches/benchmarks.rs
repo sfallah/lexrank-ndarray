@@ -120,12 +120,8 @@ pub fn benches() {
         .configure_from_args();
 
     let data_set_map = [
-        (
-            "all-MiniLM-L6-v2",
-            "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2/",
-        ),
-        //("bge-m3", "tests/test_data/superlinear_embeddings/bge-m3/"),
-        //("multilingual-e5-large-instruct", "tests/test_data/superlinear_embeddings/multilingual-e5-large-instruct/"),
+        ("all-MiniLM-L6-v2", "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2/"),
+        ("snowflake-arctic-embed-m-v1.5", "tests/test_data/superlinear_embeddings/snowflake-arctic-embed-m-v1.5"),
     ];
     for (dataset, tensor_file) in data_set_map.iter() {
         //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
