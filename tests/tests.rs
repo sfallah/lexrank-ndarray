@@ -1,8 +1,10 @@
 #[cfg(test)]
 pub mod tests {
-    use lexrank_ndarray::testing::{f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data};
-    use lexrank_ndarray::{cos_similarity, lexrank_ts, normalize_l2, similarity_matrix};
-    use ndarray::{array, Array1, Axis};
+    use lexrank_ndarray::testing::{
+        f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
+    };
+    use lexrank_ndarray::{cos_similarity, cosine_arrays, lexrank_ts, maximal_marginal_relevance, maximal_marginal_relevance_ts, normalize_l2, similarity_matrix};
+    use ndarray::{array, Array1, Array2, Axis};
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
@@ -74,6 +76,36 @@ pub mod tests {
     }
 
     #[test]
+    fn cosine_array_sim() -> anyhow::Result<()> {
+        let embed1_array = get_rand_arr1_f32(384, 0.0, 1.0)?;
+        let embed2_array = get_rand_arr1_f32(384, 0.0, 1.0)?;
+
+        let embed1 = embed1_array.flatten().to_vec();
+        let embed2 = embed2_array.flatten().to_vec();
+        let pair_sim = cos_similarity(&embed1, &embed2)?;
+        println!("Pair sim: {:8.16}", pair_sim);
+        let self_sim = cos_similarity(&embed1, &embed1)?;
+        println!("Self sim: {:8.16}", self_sim);
+        assert!(f32_close(1.0, self_sim, 1e-6));
+
+        let mut embed1_array = embed1_array.into_shape_with_order((1, 384))?;
+        let embed2_array = embed2_array.into_shape_with_order((1, 384))?;
+
+        embed1_array.append(Axis(0), embed2_array.view())?;
+        let pair_sim_mx = cosine_arrays(&embed2_array, &embed1_array)?
+            .flatten()
+            .into_iter()
+            .enumerate()
+            .reduce(|a, b| if a.1 < b.1 { a } else { b })
+            .unwrap();
+
+        println!("MX  sim: {:8.16}", pair_sim_mx.1);
+        assert!(f32_close(pair_sim, pair_sim_mx.1, 1e-6));
+
+        Ok(())
+    }
+
+    #[test]
     fn read_safetensors() -> anyhow::Result<()> {
         //let tensor_file = "tests/test_data/superlinear_embeddings/MiniLM-L6-v2/";
         //let tensor_file = "tests/test_data/superlinear_embeddings/bge-m3";
@@ -123,6 +155,37 @@ pub mod tests {
 
         Ok(())
     }
+    #[test]
+    fn max_marginal_superlinear() -> anyhow::Result<()> {
+        let test_data_path = "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2";
+
+        let splits_data = load_splits_data(&test_data_path)?;
+        println!("{:?}", splits_data.len());
+        for split_data in splits_data.iter() {
+            println!(
+                "################# {:?} #################",
+                split_data.split_id
+            );
+            println!("{:?}", split_data.no_tokens);
+            println!("{:?}", split_data.sentence_embeddings_file);
+            let tensor = load_split_tensor(&test_data_path, &split_data)?;
+            let query_array = tensor.index_axis(Axis(0), 0).into_owned().insert_axis(Axis(0));
+            let result_array = tensor.slice_axis(Axis(0), (1..).into()).to_owned();
+            
+            let res = maximal_marginal_relevance_ts(
+                &query_array,
+                &result_array,
+                None,
+                None,
+            )?;
+            
+            println!("{:?}", res);
+            
+        }
+
+        Ok(())
+    }
+    
 
     #[test]
     fn normalize_l2_test() -> anyhow::Result<()> {

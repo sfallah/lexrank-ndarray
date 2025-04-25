@@ -1,4 +1,5 @@
-use ndarray::{Array, Array1, Array2, Axis, Ix0};
+use ndarray::{s, Array, Array1, Array2, ArrayView, Axis, Ix0};
+use std::cmp::min;
 use std::ops::Sub;
 
 #[cfg(feature = "testing")]
@@ -30,10 +31,17 @@ pub fn similarity_matrix(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>
     Ok(sim_matrix)
 }
 
-pub fn cos_similarity(
-    embedding1: &Vec<f32>,
-    embedding2: &Vec<f32>,
-) -> anyhow::Result<f32> {
+pub fn cosine_arrays(
+    x_embeddings: &Array2<f32>,
+    y_embeddings: &Array2<f32>,
+) -> anyhow::Result<Array2<f32>> {
+    let x_normed = normalize_l2(x_embeddings)?;
+    let y_normed = normalize_l2(y_embeddings)?;
+    let sim_matrix = x_normed.dot(&y_normed.t());
+    Ok(sim_matrix)
+}
+
+pub fn cos_similarity(embedding1: &Vec<f32>, embedding2: &Vec<f32>) -> anyhow::Result<f32> {
     if embedding1.is_empty() || embedding2.is_empty() {
         return Err(anyhow::anyhow!("Empty embeddings"));
     }
@@ -169,8 +177,8 @@ pub fn lexrank(
         return Ok(vec![]);
     }
     let embeddings_flatten: Vec<f32> = embeddings.iter().flatten().cloned().collect();
-    let embeddings_array: Array2<f32> =
-        Array::from(embeddings_flatten).into_shape_clone((embeddings.len(), embeddings[0].len()))?;
+    let embeddings_array: Array2<f32> = Array::from(embeddings_flatten)
+        .into_shape_clone((embeddings.len(), embeddings[0].len()))?;
     lexrank_ts(&embeddings_array, threshold, max_iter)
 }
 
@@ -188,7 +196,6 @@ pub fn lexrank_array(
         Array::from(embeddings.to_vec()).into_shape_clone((no_seq, embed_dim))?;
     lexrank_ts(&embeddings_array, threshold, max_iter)
 }
-
 
 pub fn lexrank_ts(
     embeddings_array: &Array2<f32>,
@@ -212,4 +219,79 @@ pub fn lexrank_ts(
         .collect();
     ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     Ok(ranked_sentences)
+}
+
+pub fn maximal_marginal_relevance(
+    query_embedding: &Vec<f32>,
+    result_embeddings: &Vec<Vec<f32>>,
+    lambda: Option<f32>,
+    top_k: Option<usize>,
+) -> anyhow::Result<Vec<usize>> {
+    let query_array: Array2<f32> =
+        Array::from(query_embedding.to_vec()).into_shape_clone((1, query_embedding.len()))?;
+    let result_array: Array2<f32> = Array::from(
+        result_embeddings
+            .iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<f32>>(),
+    )
+    .into_shape_clone((result_embeddings.len(), query_embedding.len()))?;
+
+    maximal_marginal_relevance_ts(&query_array, &result_array, lambda, top_k)
+}
+
+pub fn maximal_marginal_relevance_ts(
+    query_array: &Array2<f32>,
+    result_array: &Array2<f32>,
+    lambda: Option<f32>,
+    top_k: Option<usize>,
+) -> anyhow::Result<Vec<usize>> {
+    let lambda = lambda.unwrap_or(0.5); // Default value
+    let top_k = top_k.unwrap_or(4); // Default value
+
+    let similarity_to_query = cosine_arrays(&query_array, &result_array)?;
+    let most_similar = similarity_to_query
+        .flatten()
+        .into_iter()
+        .enumerate()
+        .reduce(|a, b| if a.1 > b.1 { a } else { b })
+        .unwrap();
+
+    let mut selected_indices = vec![most_similar.0];
+
+    let mut selected_array: Array2<f32> = result_array
+        .slice(s![most_similar.0, ..])
+        .insert_axis(Axis(0))
+        .to_owned();
+
+    while selected_indices.len() < min(top_k, result_array.shape()[0]) {
+        let mut best_score = f32::MIN;
+        let mut index_to_add: usize = 0;
+        let similarity_to_selected = cosine_arrays(&selected_array, &result_array)?;
+        for (i, query_score) in similarity_to_query.iter().enumerate() {
+            if selected_indices.contains(&i) {
+                continue;
+            }
+            let redundant_score = similarity_to_selected
+                .flatten()
+                .into_iter()
+                .reduce(f32::max)
+                .unwrap();
+
+            let equation_score = lambda * query_score - (1.0 - lambda) * redundant_score;
+            if equation_score > best_score {
+                best_score = equation_score;
+                index_to_add = i;
+            }
+        }
+        selected_indices.push(index_to_add);
+        let selected = result_array
+            .slice(s![index_to_add, ..])
+            .insert_axis(Axis(0))
+            .to_owned();
+        selected_array.append(Axis(0), selected.view())?;
+    }
+
+    Ok(selected_indices)
 }
