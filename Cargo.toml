@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ndarray = "0.16.1"
+ndarray = { version = "0.16.1", features = ["rayon", "matrixmultiply-threading"] }
 rayon = "1.10.0"
 
 anyhow = "1.0.89"
