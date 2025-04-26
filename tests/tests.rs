@@ -3,8 +3,11 @@ pub mod tests {
     use lexrank_ndarray::testing::{
         f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
     };
-    use lexrank_ndarray::{cos_similarity, cosine_arrays, lexrank_ts, maximal_marginal_relevance, maximal_marginal_relevance_ts, normalize_l2, similarity_matrix};
-    use ndarray::{array, Array1, Array2, Axis};
+    use lexrank_ndarray::{
+        cos_similarity, cosine_arrays, lexrank_ts, maximal_marginal_relevance_ts, normalize_l2,
+        similarity_matrix,
+    };
+    use ndarray::{array, s, Array1, Array2, Axis};
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
@@ -156,7 +159,52 @@ pub mod tests {
         Ok(())
     }
     #[test]
-    fn max_marginal_superlinear() -> anyhow::Result<()> {
+    fn max_marginal_comb_lexrank() -> anyhow::Result<()> {
+        let test_data_path = "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2";
+
+        let splits_data = load_splits_data(&test_data_path)?;
+        println!("{:?}", splits_data.len());
+        for split_data in splits_data.iter() {
+            println!(
+                "################# {:?} #################",
+                split_data.split_id
+            );
+            println!("{:?}", split_data.no_tokens);
+            println!("{:?}", split_data.sentence_embeddings_file);
+            let mut tensor = load_split_tensor(&test_data_path, &split_data)?;
+
+            let lx_rank = lexrank_ts(&tensor, None, 10000)?;
+            let lx_first = lx_rank[0];
+            println!("First sentence: {:?}", lx_first);
+            let query_array = tensor
+                .index_axis(Axis(0), lx_first.0)
+                .into_owned()
+                .insert_axis(Axis(0));
+            tensor.remove_index(Axis(0), lx_first.0);
+            let result_array = tensor.to_owned();
+
+            let res = maximal_marginal_relevance_ts(&query_array, &result_array, None, None)?;
+
+            let first_sentence = split_data.sentences.get(lx_first.0).unwrap();
+            println!("First sentence: {:?}", first_sentence);
+            println!("Result: {:?}", res);
+            for sentence in res.iter() {
+                let sentence_text = split_data.sentences.get(*sentence).unwrap();
+                println!("Sentence: {:?}", sentence_text);
+            }
+
+            println!("===========  LexRanked sentences: ===========");
+            for lex_ranked in lx_rank[1..4].iter() {
+                let sentence = split_data.sentences.get(lex_ranked.0).unwrap();
+                println!("Sentence: {:?}", sentence);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn max_marginal_simple() -> anyhow::Result<()> {
         let test_data_path = "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2";
 
         let splits_data = load_splits_data(&test_data_path)?;
@@ -169,23 +217,29 @@ pub mod tests {
             println!("{:?}", split_data.no_tokens);
             println!("{:?}", split_data.sentence_embeddings_file);
             let tensor = load_split_tensor(&test_data_path, &split_data)?;
-            let query_array = tensor.index_axis(Axis(0), 0).into_owned().insert_axis(Axis(0));
+
+            let query_array = tensor
+                .index_axis(Axis(0), 0)
+                .into_owned()
+                .insert_axis(Axis(0));
+
             let result_array = tensor.slice_axis(Axis(0), (1..).into()).to_owned();
-            
-            let res = maximal_marginal_relevance_ts(
-                &query_array,
-                &result_array,
-                None,
-                None,
-            )?;
-            
-            println!("{:?}", res);
-            
+
+            let res = maximal_marginal_relevance_ts(&query_array, &result_array, None, None)?;
+
+            let res = res.iter().map(|idx| *idx + 1).collect::<Vec<usize>>();
+
+            let first_sentence = split_data.sentences.get(0).unwrap();
+            println!("First sentence: {:?}", first_sentence);
+            println!("Result: {:?}", res);
+            for sentence in res.iter() {
+                let sentence_text = split_data.sentences.get(*sentence).unwrap();
+                println!("Sentence: {:?}", sentence_text);
+            }
         }
 
         Ok(())
     }
-    
 
     #[test]
     fn normalize_l2_test() -> anyhow::Result<()> {

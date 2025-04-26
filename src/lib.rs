@@ -251,32 +251,33 @@ pub fn maximal_marginal_relevance_ts(
     let top_k = top_k.unwrap_or(4); // Default value
 
     let similarity_to_query = cosine_arrays(&query_array, &result_array)?;
+    //println!("similarity_to_query: {:?}", similarity_to_query);
     let most_similar = similarity_to_query
         .flatten()
         .into_iter()
         .enumerate()
         .reduce(|a, b| if a.1 > b.1 { a } else { b })
         .unwrap();
+    //println!("most_similar: {:?}", most_similar);
 
     let mut selected_indices = vec![most_similar.0];
 
-    let mut selected_array: Array2<f32> = result_array
-        .slice(s![most_similar.0, ..])
-        .insert_axis(Axis(0))
-        .to_owned();
+    let mut selected_array: Array2<f32> = result_array.index_axis(Axis(0),most_similar.0).insert_axis(Axis(0)).to_owned();
+    //println!("selected_array: {:?}", selected_array.shape());
 
     while selected_indices.len() < min(top_k, result_array.shape()[0]) {
         let mut best_score = f32::MIN;
         let mut index_to_add: usize = 0;
-        let similarity_to_selected = cosine_arrays(&selected_array, &result_array)?;
+        let similarity_to_selected = cosine_arrays(&result_array, &selected_array)?;
+        //println!("similarity_to_selected: {:?}", similarity_to_selected.shape());
         for (i, query_score) in similarity_to_query.iter().enumerate() {
             if selected_indices.contains(&i) {
                 continue;
             }
-            let redundant_score = similarity_to_selected
+            let redundant_score = similarity_to_selected.index_axis(Axis(0), i)
                 .flatten()
                 .into_iter()
-                .reduce(f32::max)
+                .reduce(|a, b| if a > b { a } else { b })
                 .unwrap();
 
             let equation_score = lambda * query_score - (1.0 - lambda) * redundant_score;
