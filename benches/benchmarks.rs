@@ -88,7 +88,6 @@ pub fn mmr_benchmark(c: &mut Criterion, dataset: &str, tensor_file: &str) {
             let mut tensor = array2_from_vec(&vec, &shape).unwrap();
             let lx_rank = lexrank_ts(&tensor, None, 10000).unwrap();
             let lx_first = lx_rank[0];
-            println!("First sentence: {:?}", lx_first);
             let query_array = tensor
                 .index_axis(Axis(0), lx_first.0)
                 .into_owned()

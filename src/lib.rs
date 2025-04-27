@@ -1,4 +1,4 @@
-use ndarray::{s, Array, Array1, Array2, ArrayView, Axis, Ix0};
+use ndarray::{s, Array, Array1, Array2, Axis, Ix0};
 use std::cmp::min;
 use std::ops::Sub;
 

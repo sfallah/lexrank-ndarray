@@ -108,9 +108,7 @@ pub mod tests {
 
     #[test]
     fn read_safetensors() -> anyhow::Result<()> {
-        //let tensor_file = "tests/test_data/superlinear_embeddings/MiniLM-L6-v2/";
-        //let tensor_file = "tests/test_data/superlinear_embeddings/bge-m3";
-        let tensor_file = "tests/test_data/superlinear_embeddings/multilingual-e5-large-instruct/";
+        let tensor_file = "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2";
         let splits = load_splits_data(tensor_file)?;
         let mut embeddings = load_split_tensor(tensor_file, &splits[0])?;
         println!("{:8.16}", embeddings);
