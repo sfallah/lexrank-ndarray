@@ -3,11 +3,9 @@ pub mod tests {
     use lexrank_ndarray::testing::{
         f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
     };
-    use lexrank_ndarray::{
-        cos_similarity, cosine_arrays, lexrank_ts, maximal_marginal_relevance_ts, normalize_l2,
-        similarity_matrix,
-    };
+    use lexrank_ndarray::{cos_similarity, cosine_arrays, lexrank_ts, maximal_marginal_relevance_ts, normalize_l2, similarity_matrix};
     use ndarray::{array, s, Array1, Array2, Axis};
+    use ndarray_linalg::Norm;
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
@@ -246,6 +244,22 @@ pub mod tests {
         let a = array![[1.0f32, 2., 3.], [4., 5., 6.],];
         let normed = normalize_l2(&a)?;
         println!("{:8.12}", normed);
+        use ndarray_linalg::*;
+        let normed1 = normalize(a, NormalizeAxis::Row);
+        println!("{:8.12}", normed1.0);
+        println!("{:?}", normed1.1);
+        Ok(())
+    }
+
+    #[test]
+    fn linalg_norm_test() -> anyhow::Result<()> {
+        use ndarray_linalg::*;
+        let a = array![[1.0f32, 2., 3.], [4., 5., 6.],];
+        let normed = a.norm();
+        println!("{:8.12}", normed);
+        
+        let normed1 = a.pow2().sum().sqrt();
+        println!("{:8.12}", normed1);
         Ok(())
     }
 }

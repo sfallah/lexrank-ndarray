@@ -23,6 +23,7 @@ serde = { version = "1.0.208", features = ["derive"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", default-features = false }
+ndarray-linalg = { version = "0.17.0", default-features = false }   
 
 [features]
 default = []
