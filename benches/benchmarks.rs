@@ -80,7 +80,7 @@ pub fn benches() {
     let data_set_map = [
         (
             "MiniLM-L6-v2",
-            "tests/test_data/superlinear_embeddings/MiniLM-L6-v2/",
+            "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2/",
         ),
         //("bge-m3", "tests/test_data/superlinear_embeddings/bge-m3/"),
         //("multilingual-e5-large-instruct", "tests/test_data/superlinear_embeddings/multilingual-e5-large-instruct/"),
