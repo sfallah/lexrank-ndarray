@@ -1,9 +1,129 @@
 #[cfg(test)]
 pub mod tests {
-    use lexrank_ndarray::testing::{f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data};
-    use lexrank_ndarray::{cos_similarity, lexrank_ts, normalize_l2, similarity_matrix};
+    use lexrank_ndarray::testing::{
+        f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
+    };
+    use lexrank_ndarray::{cos_similarity, lexrank_ts, norm, norm_wide, normalize_l2, similarity_matrix, transpose_wide, vec_to_wide, wide_extract, Wide, LANES};
     use ndarray::{array, Array1, Axis};
 
+    #[test]
+    fn test_tranpose_wide() -> anyhow::Result<()> {
+        let wide = vec_to_wide(&vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 0.0, 0.0])?;
+        let wide2 = vec_to_wide(&vec![11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 0.0, 0.0])?;
+        let matrix = vec![wide, wide2];
+        let transposed = transpose_wide(&matrix)?;
+        for (i, row) in transposed.iter().enumerate() {
+            println!("Row {}: {:?}", i, row);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_vec_to_wide_empty() {
+        let input: Vec<f32> = vec![];
+        let result = vec_to_wide(&input).unwrap();
+        assert!(result.is_empty(), "Expected empty output for empty input");
+    }
+
+    #[test]
+    fn test_vec_to_wide_exact_chunk() {
+        // Create vector with exactly 8 values.
+        let input: Vec<f32> = (1..=LANES).map(|x| x as f32).collect();
+        let result = vec_to_wide(&input).unwrap();
+        assert_eq!(result.len(), 1, "Expected one wide chunk");
+        for i in 0..LANES {
+            assert_eq!(result[0].to_array()[i], input[i], "Mismatch at lane {}", i);
+        }
+    }
+
+    #[test]
+    fn test_vec_to_wide_inexact_chunk() {
+        // Create vector with 10 values. Expect two wide chunks.
+        let input: Vec<f32> = (1..=10).map(|x| x as f32).collect();
+        let result = vec_to_wide(&input).unwrap();
+        assert_eq!(result.len(), 2, "Expected two wide chunks");
+
+        // Check first 8 values in the first wide chunk.
+        for i in 0..LANES {
+            assert_eq!(
+                result[0].to_array()[i],
+                input[i],
+                "Mismatch at first chunk, lane {}",
+                i
+            );
+        }
+
+        // Check remaining values in the second wide chunk.
+        // For lanes with no corresponding input, behavior depends on crate internals,
+        // so we only check the lanes that should have been populated.
+        for i in 0..2 {
+            assert_eq!(
+                result[1].to_array()[i],
+                input[8 + i],
+                "Mismatch at second chunk, lane {}",
+                i
+            );
+        }
+        for i in 2..LANES {
+            assert_eq!(
+                result[1].to_array()[i],
+                0.0,
+                "Expected zero padding at lane {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_norm_wide_empty() {
+        let tensor: Vec<Wide> = vec![];
+        let result = norm_wide(&tensor);
+        assert_eq!(result, 0.0, "Expected error for empty tensor");
+    }
+
+    #[test]
+    fn test_norm_wide_single() -> anyhow::Result<()> {
+        let wides = vec_to_wide(&vec![3.0, 4.0, 0.0, -1.0, 2.0, 0.0, 0.0, 0.0])?;
+        let result = norm_wide(wides.as_slice());
+        assert_eq!(result, 30f32.sqrt());
+        Ok(())
+    }
+
+    #[test]
+    fn test_norm_wide_more() -> anyhow::Result<()> {
+        let arr1 = vec_to_wide(&vec![3.0, 4.0, 0.0, -1.0, 2.0, 0.0, 0.0, 0.0])?;
+        let arr2 = vec_to_wide(&vec![3.0, 4.0, 0.0, -1.0, 2.0, 0.0, 0.0, 0.0])?;
+        let mut combined = arr1.clone();
+        combined.extend(arr2);
+        let res1 = norm_wide(combined.as_slice());
+        assert_eq!(res1, 60f32.sqrt());
+
+        let vec = vec![
+            3.0, 4.0, 0.0, -1.0, 2.0, 0.0, 0.0, 0.0, 3.0, 4.0, 0.0, -1.0, 2.0,
+        ];
+        let arr3 = vec_to_wide(&vec)?;
+        let res2 = norm_wide(&arr3);
+        assert_eq!(res2, res1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_norm_compare() -> anyhow::Result<()> {
+        let vec1 = vec![3.0, 4.0, 0.0, -1.0, 2.0, 0.0, 0.0, 0.0];
+        let vec2 = vec![3.0, 4.0, 0.0, -1.0, 2.0, 0.0, 0.0, 0.0];
+        let mut combined_vec = vec1.clone();
+        combined_vec.extend_from_slice(&vec2);
+
+        let nd_arr1 = Array1::from(combined_vec.clone());
+        let nd_normed1 = norm(&nd_arr1)?.into_scalar();
+        assert_eq!(nd_normed1, 60f32.sqrt());
+        let wd_arr_vec = vec_to_wide(&combined_vec)?;
+
+        let wd_normed1 = norm_wide(&wd_arr_vec);
+        assert_eq!(nd_normed1, wd_normed1);
+        Ok(())
+    }
+    
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
         let m = 25;
@@ -77,7 +197,7 @@ pub mod tests {
     fn read_safetensors() -> anyhow::Result<()> {
         //let tensor_file = "tests/test_data/superlinear_embeddings/MiniLM-L6-v2/";
         //let tensor_file = "tests/test_data/superlinear_embeddings/bge-m3";
-        let tensor_file = "tests/test_data/superlinear_embeddings/multilingual-e5-large-instruct/";
+        let tensor_file = "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2";
         let splits = load_splits_data(tensor_file)?;
         let mut embeddings = load_split_tensor(tensor_file, &splits[0])?;
         println!("{:8.16}", embeddings);
