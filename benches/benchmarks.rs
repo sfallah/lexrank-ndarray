@@ -1,10 +1,12 @@
+use std::hint::black_box;
 use std::thread;
 use std::time::{Duration, Instant};
-use criterion::{black_box, criterion_main, Criterion};
+use criterion::{criterion_main, Criterion};
+use nalgebra::DMatrix;
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
-use lexrank_ndarray::{lexrank_array, normalize_l2, similarity_matrix};
+use lexrank_ndarray::{lexrank_array, nalgebra_normalize_l2, nalgebra_similarity_matrix, normalize_l2, similarity_matrix};
 use rayon::prelude::*;
 
 pub fn ndarray_normalize_l2(c: &mut Criterion, dataset: &str, tensor_file: &str) {
@@ -32,6 +34,8 @@ pub fn ndarray_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
     c.bench_function(format!("ndarray_cosine_sim {}", dataset).as_str(), |b| {
         b.iter(|| {
             embeds_vec.par_iter().for_each(|(shape, vec)| {
+                //println!("Shape: {:?}", shape);
+                //println!("Vec length: {}", vec.len());
                 let embeddings = array2_from_vec(vec, shape).unwrap();
                 let result = similarity_matrix(black_box(&embeddings)).unwrap();
                 black_box(result);
@@ -39,6 +43,26 @@ pub fn ndarray_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
         });
     });
 }
+
+pub fn nalgebra_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
+    let splits = load_splits_data(tensor_file).unwrap();
+    let embeds_vec: Vec<_> = splits
+        .iter()
+        .map(|split| load_split_vec(tensor_file, split).unwrap())
+        .collect();
+    c.bench_function(format!("nalgebra_cosine_sim {}", dataset).as_str(), |b| {
+        b.iter(|| {
+            embeds_vec.par_iter().for_each(|(shape, vec)| {
+                let embeddings = DMatrix::from_row_slice(shape[0], shape[1], vec);
+                let normed = nalgebra_normalize_l2(&embeddings).unwrap();
+                let result = nalgebra_similarity_matrix(black_box(&normed)).unwrap();
+                black_box(result);
+            });
+        });
+    });
+}
+
+
 pub fn ndarray_lexrank(c: &mut Criterion, dataset: &str, tensor_file: &str) {
     let splits = load_splits_data(tensor_file).unwrap();
     let embeds_vec: Vec<_> = splits
@@ -87,8 +111,9 @@ pub fn benches() {
     ];
     for (dataset, tensor_file) in data_set_map.iter() {
         //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
-        //ndarray_cosine_sim(&mut criterion, dataset, tensor_file);
-        ndarray_lexrank(&mut criterion, dataset, tensor_file);
+        ndarray_cosine_sim(&mut criterion, dataset, tensor_file);
+        nalgebra_cosine_sim(&mut criterion, dataset, tensor_file);
+        //ndarray_lexrank(&mut criterion, dataset, tensor_file);
     }
 }
 
