@@ -43,7 +43,7 @@ pub fn load_split_vec(
 
 pub fn load_split_tensor(data_path: &str, split_data: &SplitData) -> anyhow::Result<Array2<f32>> {
     let (shape, vec) = load_split_vec(data_path, split_data)?;
-    println!("Embeddings dims: {:?}", shape);
+    //println!("Embeddings dims: {:?}", shape);
     let array = array2_from_vec(&vec, &shape)?;
     Ok(array)
 }

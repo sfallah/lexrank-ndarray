@@ -1,6 +1,7 @@
+use std::hint::black_box;
 use std::thread;
 use std::time::{Duration, Instant};
-use criterion::{black_box, criterion_main, Criterion};
+use criterion::{criterion_main, Criterion};
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
@@ -50,7 +51,7 @@ pub fn ndarray_lexrank(c: &mut Criterion, dataset: &str, tensor_file: &str) {
         let shape = embed.shape();
         (embed_flatten, shape[0], shape[1])
     }).collect();
-    println!("embeds_vec {:?}", embeds_vec.len());
+    //println!("embeds_vec {:?}", embeds_vec.len());
     c.bench_function(format!("ndarray_lexrank {}", dataset).as_str(), |b| {
         b.iter_custom(|iters| {
             let value = embeds_vec.clone();
@@ -86,8 +87,8 @@ pub fn benches() {
         //("multilingual-e5-large-instruct", "tests/test_data/superlinear_embeddings/multilingual-e5-large-instruct/"),
     ];
     for (dataset, tensor_file) in data_set_map.iter() {
-        //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
-        //ndarray_cosine_sim(&mut criterion, dataset, tensor_file);
+        ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
+        ndarray_cosine_sim(&mut criterion, dataset, tensor_file);
         ndarray_lexrank(&mut criterion, dataset, tensor_file);
     }
 }
