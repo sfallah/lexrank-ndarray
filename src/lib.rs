@@ -1,7 +1,5 @@
-use nalgebra::{DMatrix, DVector, EuclideanNorm, LpNorm, Matrix, OMatrix, Vector, Vector1};
 use ndarray::{Array, Array1, Array2, Axis, Ix0};
-use rayon::prelude::*;
-use std::ops::{Mul, Sub};
+use std::ops::Sub;
 
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -16,8 +14,6 @@ extern crate intel_mkl_src;
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
 }
-
-#[inline]
 pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let norm = embeddings
         .pow2()
@@ -27,27 +23,17 @@ pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let normed = embeddings / norm.insert_axis(Axis(1));
     Ok(normed)
 }
-#[inline]
-pub fn nalgebra_normalize_l2(embeddings: &DMatrix<f32>) -> anyhow::Result<DMatrix<f32>> {
-    let rows_normed: Vec<_> = embeddings.row_iter().map(|row| row.normalize()).collect();
-    Ok(DMatrix::from_rows(&rows_normed))
-}
 
-#[inline]
-pub fn nalgebra_similarity_matrix(embeddings: &DMatrix<f32>) -> anyhow::Result<DMatrix<f32>> {
-    let transpose = embeddings.transpose();
-    let sim_matrix = embeddings * transpose;
-    Ok(sim_matrix)
-}
-
-#[inline]
 pub fn similarity_matrix(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let normed = normalize_l2(embeddings)?;
     let sim_matrix = normed.dot(&normed.t());
     Ok(sim_matrix)
 }
 
-pub fn cos_similarity(embedding1: &Vec<f32>, embedding2: &Vec<f32>) -> anyhow::Result<f32> {
+pub fn cos_similarity(
+    embedding1: &Vec<f32>,
+    embedding2: &Vec<f32>,
+) -> anyhow::Result<f32> {
     if embedding1.is_empty() || embedding2.is_empty() {
         return Err(anyhow::anyhow!("Empty embeddings"));
     }
@@ -183,8 +169,8 @@ pub fn lexrank(
         return Ok(vec![]);
     }
     let embeddings_flatten: Vec<f32> = embeddings.iter().flatten().cloned().collect();
-    let embeddings_array: Array2<f32> = Array::from(embeddings_flatten)
-        .into_shape_clone((embeddings.len(), embeddings[0].len()))?;
+    let embeddings_array: Array2<f32> =
+        Array::from(embeddings_flatten).into_shape_clone((embeddings.len(), embeddings[0].len()))?;
     lexrank_ts(&embeddings_array, threshold, max_iter)
 }
 
@@ -202,6 +188,7 @@ pub fn lexrank_array(
         Array::from(embeddings.to_vec()).into_shape_clone((no_seq, embed_dim))?;
     lexrank_ts(&embeddings_array, threshold, max_iter)
 }
+
 
 pub fn lexrank_ts(
     embeddings_array: &Array2<f32>,

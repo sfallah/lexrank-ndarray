@@ -1,32 +1,8 @@
 #[cfg(test)]
 pub mod tests {
-    use lexrank_ndarray::testing::{
-        f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
-    };
-    use lexrank_ndarray::{cos_similarity, lexrank_ts, nalgebra_normalize_l2, nalgebra_similarity_matrix, normalize_l2, similarity_matrix};
-    use nalgebra::{dvector, DMatrix, DVector, Matrix, Vector, Vector1};
-    use ndarray::{arr1, array, Array1, Axis};
-
-    #[test]
-    fn test_nalgebra_norm() -> anyhow::Result<()> {
-        let a = array![[1.0f32, 2., 3.], [4., 5., 6.]];
-        let normed = normalize_l2(&a.clone())?;
-        println!("Nd Normed: {:8.12}", normed);
-
-        let mut n_matrix = DMatrix::from_row_slice(2, 3, a.flatten().as_slice().unwrap());
-        let n_norm = n_matrix.norm();
-        println!("Nl Norm: {:8.12}", n_norm);
-
-        let n_normed = n_matrix.normalize();
-        println!("Nl Normed: {:8.12}", n_normed);
-
-        for row in n_matrix.row_iter() {
-            let row_norm = row.normalize();
-            println!("Row Normed: {:8.12}", row_norm);
-        }
-
-        Ok(())
-    }
+    use lexrank_ndarray::testing::{f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data};
+    use lexrank_ndarray::{cos_similarity, lexrank_ts, normalize_l2, similarity_matrix};
+    use ndarray::{array, Array1, Axis};
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
@@ -46,64 +22,11 @@ pub mod tests {
         let mut embeds = Array1::range(0f32, 10., 1.).into_shape_clone((2, 5))?;
         let embeds_normed = normalize_l2(&mut embeds)?;
         assert_eq!(embeds_normed.shape(), [2, 5]);
-        println!("Nd normed: {:8.16}", embeds_normed);
+        println!("{:8.16}", embeds_normed);
 
         let sim_matrix = similarity_matrix(&mut embeds)?;
         assert_eq!(sim_matrix.shape(), [2, 2]);
-        println!("Nd Sim: {:8.16}", sim_matrix);
-        let embeds_vec = embeds.flatten().to_vec();
-        let embeds_matrix = DMatrix::from_row_slice(2, 5, &embeds_vec);
-        let embeds_matrix_normed = nalgebra_normalize_l2(&embeds_matrix)?;
-        println!("Nl Normed: {:8.16}", embeds_matrix_normed);
-        let sim_mateix_nl = nalgebra_similarity_matrix(&embeds_matrix_normed)?;
-        println!("Nl Sim: {:8.16}", sim_mateix_nl);
-        // tuple to vec conversion
-
-        let sim_shape = (sim_matrix.shape()[0], sim_matrix.shape()[1]);
-        assert_eq!(sim_mateix_nl.shape(), sim_shape);
-        Ok(())
-    }
-
-    #[test]
-    fn ndarray_cosine_sim_new() -> anyhow::Result<()> {
-        let mut embeds = Array1::range(0f32, 10., 1.).into_shape_clone((2, 5))?;
-        let embeds_normed = normalize_l2(&mut embeds)?;
-        assert_eq!(embeds_normed.shape(), [2, 5]);
-        println!("Nd normed: {:8.16}", embeds_normed);
-
-        let sim_matrix = similarity_matrix(&mut embeds)?;
-        println!("Nd Sim: {:8.16}", sim_matrix);
-
-        let embeds_vec = embeds.flatten().to_vec();
-        let embeds_matrix = DMatrix::from_row_slice(2, 5, &embeds_vec);
-        
-        let vec1 = dvector![0.0f32, 1.0, 2.0, 3.0, 4.0];
-        let vec2 = dvector![5.0f32, 6.0, 7.0, 8.0, 9.0];
-
-        let mut sim_matrix_new = Vec::with_capacity(2);
-        let normed_rows: Vec<_> = embeds_matrix
-            .row_iter()
-            .map(|row| row.normalize())
-            .collect();
-        for row in normed_rows.iter() {
-            for other_row in normed_rows.iter() {
-                let sim = row.dot(other_row);
-                sim_matrix_new.push(sim);
-            }
-        }
-
-        let sim_matrix_nl: DMatrix<f32> = DMatrix::from_row_slice(2, 2, &sim_matrix_new);
-        println!("New Sim: {:8.16}", sim_matrix_nl);
-        
-
-        let embeds_matrix_normed = nalgebra_normalize_l2(&embeds_matrix)?;
-        println!("Nl Normed: {:8.16}", embeds_matrix_normed);
-        let sim_mateix_nl = nalgebra_similarity_matrix(&embeds_matrix_normed)?;
-        println!("Nl Sim: {:8.16}", sim_mateix_nl);
-        // tuple to vec conversion
-
-        let sim_shape = (sim_matrix.shape()[0], sim_matrix.shape()[1]);
-        assert_eq!(sim_mateix_nl.shape(), sim_shape);
+        println!("{:8.16}", sim_matrix);
         Ok(())
     }
 
@@ -154,7 +77,7 @@ pub mod tests {
     fn read_safetensors() -> anyhow::Result<()> {
         //let tensor_file = "tests/test_data/superlinear_embeddings/MiniLM-L6-v2/";
         //let tensor_file = "tests/test_data/superlinear_embeddings/bge-m3";
-        let tensor_file = "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2/";
+        let tensor_file = "tests/test_data/superlinear_embeddings/multilingual-e5-large-instruct/";
         let splits = load_splits_data(tensor_file)?;
         let mut embeddings = load_split_tensor(tensor_file, &splits[0])?;
         println!("{:8.16}", embeddings);
