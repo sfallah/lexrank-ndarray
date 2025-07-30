@@ -1,7 +1,9 @@
+use core::simd::f32x4;
+use std::simd::prelude::*;
+// SIMD vector type for 8 × f32
 use anyhow::{anyhow, Result};
 use ndarray::{Array, Array2};
-use tinyvec::TinyVec;
-use wide::{f32x4, CmpGe};
+use smallvec::SmallVec;
 // SIMD lane = 4 × f32
 
 // ────────────────────────────────────────────────────────────
@@ -10,67 +12,72 @@ pub type Wide = f32x4;
 pub const LANES: usize = 4;
 
 /// A row of SIMD values.
-/// We keep `LANES` items inline; if we push more, TinyVec spills to the heap.
-pub type WideRow = TinyVec<[Wide; LANES]>;
+/// We keep `LANES` items inline; if we push more, SmallVec spills to the heap.
+pub type WideRow = SmallVec<[Wide; LANES]>;
 
 /// Keep four rows inline before spilling; pick a different number if you wish.
-pub type WideMatrix = TinyVec<[WideRow; LANES]>;
+pub type WideMatrix = SmallVec<[WideRow; LANES]>;
 
 // ────────────────────────────────────────────────────────────
 // SIMD helpers                                                  */
 #[inline(always)]
 pub fn vec_to_row(v: &[f32]) -> WideRow {
-    let mut out = TinyVec::with_capacity(wide_size(v.len()));
+    let mut out = SmallVec::with_capacity(wide_size(v.len()));
     for chunk in v.chunks(LANES) {
-        out.push(Wide::from(chunk));
+        out.push(Wide::load_or(chunk, Wide::splat(0.0)));
     }
     out
 }
 
 pub fn max_wide_matrix(matrix: &WideMatrix) -> Option<f32> {
     // 1. running SIMD maximum, one register wide
-    let mut max_wide = Wide::splat(f32::MIN);
+    let mut max_wide = f32::MIN;
 
     for row in matrix.iter() {
-        //     ^ TinyVec<T> already derefs to a slice, so `.iter()` is cheap
+        //     ^ SmallVec<T> already derefs to a slice, so `.iter()` is cheap
         for &wide in row {
             // &Wide → Wide (Copy)
-            max_wide = max_wide.max(wide); // lane‑wise max :contentReference[oaicite:0]{index=0}
+            let wide_max = wide.reduce_max(); // lane‑wise max :contentReference[oaicite:0]{index=0}
+            max_wide = if wide_max > max_wide {
+                wide_max
+            } else {
+                max_wide
+            }; // lane‑wise max :contentReference[oaicite:0]{index=0}
         }
     }
 
     // 2. horizontal reduction to one scalar
-    max_wide
-        .to_array() // [f32; 4]  :contentReference[oaicite:1]{index=1}
-        .into_iter()
-        .reduce(f32::max)
+    Some(max_wide)
 }
 
 pub fn min_wide_matrix(matrix: &WideMatrix) -> Option<f32> {
     // 1. running SIMD maximum, one register wide
-    let mut min_wide = Wide::splat(f32::MAX);
+    // 1. running SIMD maximum, one register wide
+    let mut max_wide = f32::MIN;
 
     for row in matrix.iter() {
-        //     ^ TinyVec<T> already derefs to a slice, so `.iter()` is cheap
+        //     ^ SmallVec<T> already derefs to a slice, so `.iter()` is cheap
         for &wide in row {
             // &Wide → Wide (Copy)
-            min_wide = min_wide.max(wide); // lane‑wise max :contentReference[oaicite:0]{index=0}
+            let wide_max = wide.reduce_max(); // lane‑wise max :contentReference[oaicite:0]{index=0}
+            max_wide = if wide_max > max_wide {
+                wide_max
+            } else {
+                max_wide
+            }; // lane‑wise max :contentReference[oaicite:0]{index=0}
         }
     }
 
     // 2. horizontal reduction to one scalar
-    min_wide
-        .to_array() // [f32; 4]  :contentReference[oaicite:1]{index=1}
-        .into_iter()
-        .reduce(f32::min)
+    Some(max_wide)
 }
 
 #[inline(always)]
 pub fn flatten_vec_to_wide_matrix(vec: &[f32], n_rows: usize, n_cols: usize) -> Result<WideMatrix> {
     if vec.is_empty() || n_rows == 0 || n_cols == 0 {
-        return Ok(TinyVec::new());
+        return Ok(SmallVec::new());
     }
-    let mut wide_matrix: WideMatrix = TinyVec::with_capacity(n_rows);
+    let mut wide_matrix: WideMatrix = SmallVec::with_capacity(n_rows);
     for row in vec.chunks(n_cols) {
         wide_matrix.push(vec_to_row(row));
     }
@@ -79,7 +86,7 @@ pub fn flatten_vec_to_wide_matrix(vec: &[f32], n_rows: usize, n_cols: usize) -> 
 
 pub fn vec_to_wide_matrix(vec: &[Vec<f32>]) -> Result<WideMatrix> {
     if vec.is_empty() {
-        return Ok(TinyVec::new());
+        return Ok(SmallVec::new());
     }
     let n_rows = vec.len();
     let n_cols = vec[0].len();
@@ -94,20 +101,23 @@ pub fn norm_wide(wides: &[Wide]) -> f32 {
     for wide in wides {
         sum += *wide * *wide; // Element-wise square
     }
-    sum.reduce_add().sqrt()
+    sum.reduce_sum().sqrt() // Horizontal sum and square root
 }
 
 /// Row‑wise L2 normalisation: each row is divided by its own ‖row‖₂.
 ///
 /// Fails if a row’s norm is zero or non‑finite.
-pub fn normalize_l2_wide_old(matrix: &WideMatrix) -> Result<WideMatrix> {
-    let mut out = TinyVec::with_capacity(matrix.len());
+/// Row‑wise L2 normalisation: each row is divided by its own ‖row‖₂.
+///
+/// Fails if a row’s norm is zero or non‑finite.
+pub fn normalize_l2_wide(matrix: &WideMatrix) -> Result<WideMatrix> {
+    let mut out = SmallVec::with_capacity(matrix.len());
 
     for row in matrix {
         // ---------- 1. compute this row's squared‑L2 norm ----------
         let mut row_sum_sq = 0.0_f32;
-        for &w in row {
-            row_sum_sq += (w * w).reduce_add() // four lanes at once
+        for &chunk in row {
+            row_sum_sq += (chunk * chunk).reduce_sum(); // four lanes at once
         }
 
         if row_sum_sq == 0.0 || !row_sum_sq.is_finite() {
@@ -115,11 +125,11 @@ pub fn normalize_l2_wide_old(matrix: &WideMatrix) -> Result<WideMatrix> {
         }
 
         // ---------- 2. scale this row only ----------
-        //let scale = Wide::splat(1.0 / row_sum_sq.sqrt()); // multiply beats divide
-        let mut normed_row: WideRow = TinyVec::with_capacity(row.len());
+        let scale = Wide::splat(1.0 / row_sum_sq.sqrt()); // multiply beats divide
+        let mut normed_row: WideRow = SmallVec::with_capacity(row.len());
 
-        for &w in row {
-            normed_row.push(w / Wide::splat(row_sum_sq.sqrt())); // element‑wise divide
+        for &chunk in row {
+            normed_row.push(chunk * scale);
         }
 
         out.push(normed_row);
@@ -128,8 +138,8 @@ pub fn normalize_l2_wide_old(matrix: &WideMatrix) -> Result<WideMatrix> {
     Ok(out)
 }
 
-pub fn normalize_l2_wide(embeddings: &WideMatrix) -> Result<WideMatrix> {
-    let norm: TinyVec<[f32; 4]> = embeddings.iter().map(|wide| norm_wide(wide)).collect();
+pub fn normalize_l2_wide_old(embeddings: &WideMatrix) -> Result<WideMatrix> {
+    let norm: SmallVec<[f32; 4]> = embeddings.iter().map(|wide| norm_wide(wide)).collect();
 
     let normed: WideMatrix = embeddings
         .iter()
@@ -184,7 +194,7 @@ pub fn create_markov_matrix_discrete_wide(
     threshold: f32,
 ) -> Result<WideMatrix> {
     if weights.is_empty() {
-        return Ok(TinyVec::new());
+        return Ok(SmallVec::new());
     }
 
     let discrete_weights = wide_discrete_weights(weights, threshold)?;
@@ -193,14 +203,14 @@ pub fn create_markov_matrix_discrete_wide(
 
 fn wide_discrete_weights(weights: &WideMatrix, threshold: f32) -> Result<WideMatrix> {
     let th = Wide::splat(threshold);
-    let ones = Wide::ONE;
-    let zeros = Wide::ZERO;
-    let mut discrete_weights = TinyVec::with_capacity(weights.len());
+    let ones = Wide::splat(1.0); // Wide with all lanes set to 1.0
+    let zeros = Wide::splat(0.0);
+    let mut discrete_weights = SmallVec::with_capacity(weights.len());
     for row in weights {
-        let mut bin_row: WideRow = TinyVec::with_capacity(row.len());
+        let mut bin_row: WideRow = SmallVec::with_capacity(row.len());
         for &w in row {
             // cmp_ge returns a “mask” vector; blend chooses per‑lane
-            let bin = w.cmp_ge(th).blend(ones, zeros);
+            let bin = w.simd_ge(th).select(ones, zeros); // if w >= th then 1.0 else 0.0
             bin_row.push(bin);
         }
         discrete_weights.push(bin_row);
@@ -214,11 +224,11 @@ pub fn wide_create_markov_matrix(weights_matrix: &WideMatrix) -> Result<WideMatr
         Ok(wide_softmax(weights_matrix)?)
     } else {
         let row_sum = wide_matrix_row_sum(weights_matrix);
-        let mut out = TinyVec::with_capacity(weights_matrix.len());
+        let mut out = SmallVec::with_capacity(weights_matrix.len());
         for row in weights_matrix {
             let sum = wide_row_sum(row)?;
             let inv_sum = Wide::splat(1.0 / sum);
-            let mut exp_row: WideRow = TinyVec::with_capacity(row.len());
+            let mut exp_row: WideRow = SmallVec::with_capacity(row.len());
             for &w in row {
                 let nw = w * inv_sum;
                 exp_row.push(nw);
@@ -233,18 +243,18 @@ pub fn wide_create_markov_matrix(weights_matrix: &WideMatrix) -> Result<WideMatr
 pub fn wide_row_sum(row: &WideRow) -> Result<f32> {
     let mut sum = 0.0f32;
     for w in row {
-        sum += w.reduce_add();
+        sum += w.reduce_sum();
     }
     Ok(sum)
 }
 
-pub fn wide_matrix_row_sum(mat: &WideMatrix) -> Result<TinyVec<[f32; LANES]>> {
-    let mut out = TinyVec::with_capacity(mat.len());
+pub fn wide_matrix_row_sum(mat: &WideMatrix) -> Result<SmallVec<[f32; LANES]>> {
+    let mut out = SmallVec::with_capacity(mat.len());
 
     for row in mat {
         let mut sum = 0.0f32;
         for w in row {
-            sum += w.reduce_add();
+            sum += w.reduce_sum();
         }
         out.push(sum);
     }
@@ -255,7 +265,7 @@ pub fn wide_matrix_row_sum(mat: &WideMatrix) -> Result<TinyVec<[f32; LANES]>> {
 fn dot_wide(a: &WideRow, b: &WideRow) -> f32 {
     let mut acc = 0.0;
     for (x, y) in a.iter().zip(b.iter()) {
-        acc += (*x * *y).reduce_add(); // element‑wise multiply and lane‑wise sum
+        acc += (*x * *y).reduce_sum(); // element‑wise multiply and lane‑wise sum
     }
     acc // lane‑wise sum → scalar
 }
@@ -273,7 +283,7 @@ fn l2_norm(a: &[f32], b: &[f32]) -> f32 {
 /// C = A·B  (all three are *transposed* matrices: rows = columns)
 fn square_transposed(mat: &WideMatrix) -> WideMatrix {
     let n = mat.len();
-    let mut out = TinyVec::with_capacity(n);
+    let mut out = SmallVec::with_capacity(n);
 
     for i in 0..n {
         let mut row_vals = Vec::with_capacity(n);
@@ -354,22 +364,22 @@ fn wide_size(n: usize) -> usize {
 fn wide_row_ones(n: usize) -> WideRow {
     let n_wides = wide_size(n); // round up to the next multiple of LANES
     (0..n_wides)
-        .map(|_| Wide::ONE) // create a Wide with all lanes set to 1.0
+        .map(|_| Wide::splat(1.0)) // create a Wide with all lanes set to 1.0
         .collect()
 }
 
 pub fn wide_softmax(mat: &WideMatrix) -> Result<WideMatrix> {
-    let mut out = TinyVec::with_capacity(mat.len());
+    let mut out = SmallVec::with_capacity(mat.len());
 
     for row in mat {
         // 1. exponentiate every element and accumulate the row sum
-        let mut exp_row: WideRow = TinyVec::with_capacity(row.len());
+        let mut exp_row: WideRow = SmallVec::with_capacity(row.len());
         let mut sum = 0.0f32;
 
         for &w in row {
             // wide::f32x4 has `exp` (element‑wise) and `horizontal_sum`
-            let ew = w.exp();
-            sum += ew.reduce_add();
+            let ew = w * w; // element‑wise square
+            sum += ew.reduce_sum();
             exp_row.push(ew);
         }
 
@@ -405,7 +415,7 @@ pub fn lexrank_wide(
 }
 
 #[inline(always)]
-fn row_to_vec(row: &WideRow) -> TinyVec<[f32; LANES]> {
+fn row_to_vec(row: &WideRow) -> SmallVec<[f32; LANES]> {
     row.iter().flat_map(|w| w.to_array()).collect()
 }
 

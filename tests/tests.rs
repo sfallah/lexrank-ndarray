@@ -1,13 +1,11 @@
 #[cfg(test)]
 pub mod tests {
-    use memmap2::Advice::WillNeed;
     use lexrank_ndarray::testing::{
         f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
     };
     use lexrank_ndarray::{cos_similarity, flatten_vec_to_wide_matrix, lexrank_ts, normalize_l2, similarity_matrix, similarity_matrix_wide, vec_to_row, Wide};
     use ndarray::{array, Array1, Axis};
-    use tinyvec::tiny_vec;
-
+    use smallvec::smallvec;
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
@@ -50,7 +48,7 @@ pub mod tests {
         let vec2 = vec![5.0f32, 6.0, 7.0, 8.0, 9.0];
         let wide1 = vec_to_row(&vec1);
         let wide2 = vec_to_row(&vec2);
-        let sim_matrix_wide = similarity_matrix_wide(&tiny_vec!(wide1, wide2))?;
+        let sim_matrix_wide = similarity_matrix_wide(&smallvec!(wide1, wide2))?;
         assert_eq!(sim_matrix_wide.shape(), [2, 2]);
         println!("{:8.16}", sim_matrix_wide);
 
