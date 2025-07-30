@@ -22,6 +22,7 @@ serde_json = { version = "1.0.128", optional = true }
 serde = { version = "1.0.208", features = ["derive"], optional = true }
 wide = "0.7.33"
 smallvec = "1.15.1"
+matrixmultiply = "0.3.10"
 
 
 [dev-dependencies]

@@ -7,22 +7,23 @@ extern crate blis_src;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
-
-use std::ops::Sub;
 use anyhow::{anyhow, Result};
 use ndarray::{Array, Array1, Array2, Axis, Ix0};
+use std::ops::Sub;
 
 #[cfg(feature = "testing")]
 pub mod testing;
 mod wide_impl;
 
-pub use wide_impl::{flatten_vec_to_wide_matrix, similarity_matrix_wide, vec_to_row, similarity_matrix_wide_opt, WideRow, WideMatrix, Wide};
+pub use wide_impl::{
+    flatten_vec_to_wide_matrix, similarity_matrix_mm, similarity_matrix_wide,
+    similarity_matrix_wide_opt, similarity_matrix_wide_opt_par, similarity_matrix_wide_par,
+    vec_to_row, Wide, WideMatrix, WideRow,
+};
 
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
 }
-
-
 
 pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let norm = embeddings
@@ -33,10 +34,6 @@ pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let normed = embeddings / norm.insert_axis(Axis(1));
     Ok(normed)
 }
-
-
-
-
 
 pub fn similarity_matrix(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let normed = normalize_l2(embeddings)?;
@@ -70,7 +67,6 @@ pub fn cos_similarity(embedding1: &Vec<f32>, embedding2: &Vec<f32>) -> anyhow::R
 ///
 /// Returns an error if a row’s sum is 0 or non‑finite.
 
-
 pub fn create_markov_matrix_discrete(
     weights_matrix: &Array2<f32>,
     threshold: f32,
@@ -94,21 +90,16 @@ pub fn create_markov_matrix(weights_matrix: &Array2<f32>) -> anyhow::Result<Arra
     }
 }
 
-
-
 pub fn softmax(weights_matrix: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let exp_vals = weights_matrix.mapv(f32::exp);
     let exp_sum = exp_vals.sum_axis(Axis(1));
     Ok(exp_vals / exp_sum.insert_axis(Axis(1)))
 }
 
-
-
 /// Numerically‑stable softmax over each row.
 ///
 /// * If the matrix is empty the result is empty.
 /// * Every row keeps the same SIMD chunking as the input (no re‑packing).
-
 
 pub fn degree_centrality_scores(
     similarity_matrix: &Array2<f32>,
@@ -202,8 +193,6 @@ pub fn lexrank(
     lexrank_ts(&embeddings_array, threshold, max_iter)
 }
 
-
-
 pub fn lexrank_array(
     embeddings: &Vec<f32>,
     no_seq: usize,
@@ -242,5 +231,3 @@ pub fn lexrank_ts(
     ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     Ok(ranked_sentences)
 }
-
-

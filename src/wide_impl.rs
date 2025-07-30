@@ -1,4 +1,5 @@
 use core::simd::f32x4;
+use rayon::prelude::*;
 use std::simd::prelude::*;
 // SIMD vector type for 8 × f32
 use anyhow::{anyhow, Result};
@@ -138,6 +139,36 @@ pub fn normalize_l2_wide(matrix: &WideMatrix) -> Result<WideMatrix> {
     Ok(out)
 }
 
+/// Row‑wise L2 normalisation — now parallel with Rayon.
+///
+/// Each row’s work is completely independent, so the algorithm scales
+/// almost linearly with the number of CPU cores.
+///
+/// *Fails* if any row has a zero or non‑finite norm.
+pub fn normalize_l2_wide_par(matrix: &WideMatrix) -> Result<WideMatrix> {
+    // 1. do every row on a different thread
+    let rows: Vec<WideRow> = matrix
+        .as_slice() // slice → `ParallelSlice`
+        .par_iter()
+        .map(|row| {
+            // --- 1a. squared L2 norm (SIMD add) --------------------------
+            let mut sum_sq = 0.0f32;
+            for &chunk in row {
+                sum_sq += (chunk * chunk).reduce_sum(); // four lanes at once
+            }
+
+            // --- 1b. scale the entire row --------------------------------
+            let scale = Wide::splat(1.0 / sum_sq.sqrt());
+            let mut normed: WideRow = SmallVec::with_capacity(row.len());
+            for &chunk in row {
+                normed.push(chunk * scale);
+            }
+            normed
+        })
+        .collect();
+
+    Ok(SmallVec::from(rows))
+}
 pub fn normalize_l2_wide_old(embeddings: &WideMatrix) -> Result<WideMatrix> {
     let norm: SmallVec<[f32; 4]> = embeddings.iter().map(|wide| norm_wide(wide)).collect();
 
@@ -166,6 +197,25 @@ pub fn similarity_matrix_wide(p0: &WideMatrix) -> Result<Array2<f32>> {
     Ok(sim_matrix)
 }
 
+pub fn similarity_matrix_wide_par(p0: &WideMatrix) -> Result<Array2<f32>> {
+    // 1. row‑wise L2 normalisation (unchanged, still SIMD)
+    let normed = normalize_l2_wide(p0)?;
+    let n = normed.len();
+
+    // 2. compute all row–column dot products in parallel
+    //
+    //    normed.par_iter()  gives us a `ParallelIterator` over &WideRow.
+    //    `flat_map_iter` expands each row into n dot products, so the final
+    //    collect builds one flat Vec<f32> of length n*n.
+    let sims: Vec<f32> = normed
+        .par_iter()
+        .flat_map_iter(|row| normed.iter().map(move |col| dot_wide(row, col)))
+        .collect();
+
+    // 3. reshape into the dense matrix expected by the caller
+    Ok(Array2::from_shape_vec((n, n), sims)?)
+}
+
 pub fn similarity_matrix_wide_opt(p0: &WideMatrix) -> Result<WideMatrix> {
     let normed = normalize_l2_wide(p0)?;
     let n = normed.len();
@@ -186,6 +236,90 @@ pub fn similarity_matrix_wide_opt(p0: &WideMatrix) -> Result<WideMatrix> {
         }
     }
 
+    Ok(flatten_vec_to_wide_matrix(&sims, n, n)?)
+}
+
+use matrixmultiply::sgemm;           // crate = "matrixmultiply" in Cargo.toml
+
+
+pub fn similarity_matrix_mm(p0: &WideMatrix) -> Result<WideMatrix> {
+    // 0.  L2 normalise as before (still SIMD & optionally Rayon)
+    let normed = normalize_l2_wide(p0)?;
+    let rows   = normed.len();
+    let cols   = normed[0].len() * 4;           // SIMD lanes → scalar width
+
+    // 1.  Flatten into one contiguous row‑major matrix A (rows × cols)
+    let mut a = Vec::<f32>::with_capacity(rows * cols);
+    for row in &normed {
+        for chunk in row {                      // Wide → [f32; 4]
+            a.extend_from_slice(&chunk.to_array());
+        }
+    }
+
+    // 2.  Allocate C = rows × rows and run SGEMM
+    let mut c = vec![0.0f32; rows * rows];
+
+    unsafe {
+        // C ← 1 · A · Aᵀ + 0 · C
+        //
+        // row‑major layout ⇒ row_stride = cols, col_stride = 1
+        // Aᵀ therefore has row_stride = 1, col_stride = cols
+        sgemm(
+            rows,       // m
+            cols,       // k
+            rows,       // n
+            1.0,        // α
+            a.as_ptr(), cols as isize, 1,          // A
+            a.as_ptr(), 1, cols as isize,          // B = Aᵀ
+            0.0,        // β
+            c.as_mut_ptr(), rows as isize, 1,      // C (row‑major)
+        );
+    }
+    // NOTE: enable the "threading" feature on matrixmultiply if you want it
+    // to spawn worker threads internally (reads MATMUL_NUM_THREADS env‑var):contentReference[oaicite:0]{index=0}.
+
+    // 3.  Re‑pack C back into your SIMD/TinyVec layout
+    Ok(flatten_vec_to_wide_matrix(&c, rows, rows)?)
+}
+
+/// Triangular cosine‑similarity, SIMD + Rayon.
+///
+/// * Rows are L2‑normalised first (still SIMD).
+/// * For each `i` we compute `sim(i, j)` only for `j ≥ i`.
+///   After all threads finish we mirror the values to the lower triangle.
+/// * Returns a dense `WideMatrix` laid out like the input helpers
+///   (`flatten_vec_to_wide_matrix` packs the flat `Vec<f32>` into SIMD).
+pub fn similarity_matrix_wide_opt_par(p0: &WideMatrix) -> Result<WideMatrix> {
+    let normed = normalize_l2_wide(p0)?;
+    let n = normed.len();
+    if n == 0 {
+        return Ok(SmallVec::new());
+    }
+
+    // 1. pre‑allocate the whole N×N buffer
+    let mut sims = vec![0.0f32; n * n];
+
+    // 2. fill one row per Rayon job (upper triangle + diagonal)
+    sims.par_chunks_mut(n)
+        .enumerate()
+        .for_each(|(i, row_slice)| {
+            row_slice[i] = 1.0; // diagonal
+            let row_vec = &normed[i];
+
+            for j in (i + 1)..n {
+                let sim = dot_wide(row_vec, &normed[j]);
+                row_slice[j] = sim; // write only j ≥ i
+            }
+        });
+
+    // 3. single‑threaded mirror to the lower triangle
+    for i in 0..n {
+        for j in (i + 1)..n {
+            sims[j * n + i] = sims[i * n + j];
+        }
+    }
+
+    // 4. pack the flat buffer back into a WideMatrix
     Ok(flatten_vec_to_wide_matrix(&sims, n, n)?)
 }
 
@@ -268,6 +402,29 @@ fn dot_wide(a: &WideRow, b: &WideRow) -> f32 {
         acc += (*x * *y).reduce_sum(); // element‑wise multiply and lane‑wise sum
     }
     acc // lane‑wise sum → scalar
+}
+
+#[inline(always)]
+fn dot_wide_par(a: &WideRow, b: &WideRow) -> f32 {
+    debug_assert_eq!(a.len(), b.len());
+
+    // heuristic: ≤ 32 registers ≈ 128 floats – cheaper to stay serial
+    if a.len() <= 32 {
+        let mut acc = Wide::splat(0.0);
+        for (&x, &y) in a.iter().zip(b.iter()) {
+            acc += x * y;
+        }
+        return acc.reduce_sum();
+    }
+
+    // parallel path ---------------------------------------------------------
+    let acc = a
+        .par_iter()               // &Wide → ParallelIterator
+        .zip(b.par_iter())        // pair up the registers
+        .map(|(&x, &y)| x * y)    // element‑wise product
+        .reduce(|| Wide::splat(0.0), |s, v| s + v);
+
+    acc.reduce_sum()              // single horizontal reduction → scalar
 }
 
 #[inline(always)]
