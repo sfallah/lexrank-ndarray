@@ -43,7 +43,7 @@ pub fn load_split_vec(
 
 pub fn load_split_tensor(data_path: &str, split_data: &SplitData) -> anyhow::Result<Array2<f32>> {
     let (shape, vec) = load_split_vec(data_path, split_data)?;
-    println!("Embeddings dims: {:?}", shape);
+    //println!("Embeddings dims: {:?}", shape);
     let array = array2_from_vec(&vec, &shape)?;
     Ok(array)
 }
@@ -76,11 +76,7 @@ pub fn get_rand_arr2_f32(
     Ok(rnd_arr)
 }
 
-pub fn get_rand_arr1_f32(
-    m: usize,
-    mean: f32,
-    std_dev: f32,
-) -> anyhow::Result<Array1<f32>> {
+pub fn get_rand_arr1_f32(m: usize, mean: f32, std_dev: f32) -> anyhow::Result<Array1<f32>> {
     let rnd_arr = Array::random(m, Normal::new(mean, std_dev)?).into();
     Ok(rnd_arr)
 }

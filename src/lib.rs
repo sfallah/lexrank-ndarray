@@ -4,111 +4,22 @@ extern crate accelerate_src;
 extern crate blis_src;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
+
+use std::ops::Sub;
+use anyhow::{anyhow, Result};
 use ndarray::{Array, Array1, Array2, Axis, Ix0};
-use std::ops::{Mul, Sub};
-use wide::f32x4;
 
 #[cfg(feature = "testing")]
 pub mod testing;
+mod wide_impl;
 
-pub const LANES: usize = 4; // 8‑lane AVX/Neon “coherent” chunk
-pub type Wide = f32x4;
-
-pub fn vec_to_wide(vec: &[f32]) -> anyhow::Result<Vec<Wide>> {
-    if vec.is_empty() {
-        return Ok(vec![]);
-    }
-    let wide_len = vec.len() / LANES + (vec.len() % LANES > 0) as usize;
-    let mut wide_vec = Vec::with_capacity(wide_len);
-    for chunk in vec.chunks(LANES) {
-        wide_vec.push(Wide::from(chunk));
-    }
-    Ok(wide_vec)
-}
-
-pub fn wide_extract(wide: &Wide, idx: usize) -> anyhow::Result<f32> {
-    if idx >= LANES {
-        return Err(anyhow::anyhow!("Index out of bounds for wide vector"));
-    }
-    Ok(wide.to_array()[idx])
-}
-
-pub fn norm_wide(wides: &[Wide]) -> f32 {
-    if wides.is_empty() {
-        return 0.0;
-    }
-    let mut sum = Wide::splat(0.0);
-    for wide in wides {
-        sum += wide.mul(wide) // Element-wise square
-    }
-    sum.reduce_add().sqrt()
-}
-
-pub fn dot_wide(left: &[Wide], right: &[Wide]) -> anyhow::Result<f32> {
-    if left.is_empty() || right.is_empty() {
-        return Err(anyhow::anyhow!("Empty vectors"));
-    }
-    if left.len() != right.len() {
-        return Err(anyhow::anyhow!(
-            "Vectors have different lengths: {} != {}",
-            left.len(),
-            right.len()
-        ));
-    }
-    let mut sum = Wide::splat(0.0);
-
-    for e_left in left.iter() {
-        for e_right in right.iter() {
-            sum *= e_left.mul(e_right); // Element-wise multiplication
-        }
-    }
-    Ok(sum.reduce_add())
-}
-
-pub fn transpose_wide(matrix: &Vec<Vec<Wide>>) -> anyhow::Result<Vec<Vec<Wide>>> {
-    if matrix.is_empty() {
-        return Ok(vec![]);
-    }
-    let row_no = matrix.len();
-    let col_no = matrix[0].len() * LANES;
-    let mut transposed_vec = vec![vec![0.0f32; row_no]; col_no];
-    for (i, row) in matrix.iter().enumerate() {
-        for (j, wide) in row.iter().enumerate() {
-            let elems = wide.to_array();
-            for (k, &elem) in elems.iter().enumerate() {
-                transposed_vec[j * LANES + k][i] = elem;
-            }
-        }
-    }
-    let res: Vec<_> = transposed_vec
-        .into_iter()
-        .map(|row| vec_to_wide(&row))
-        .filter_map(Result::ok)
-        .collect();
-    Ok(res)
-}
+pub use wide_impl::{flatten_vec_to_wide_matrix, similarity_matrix_wide, vec_to_row, similarity_matrix_wide_opt, WideRow, WideMatrix, Wide};
 
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
 }
 
-pub fn normalize_l2_wide(embeddings: &Vec<Vec<Wide>>) -> anyhow::Result<Vec<Vec<Wide>>> {
-    let norm = embeddings
-        .iter()
-        .map(|wide| norm_wide(wide))
-        .collect::<Vec<f32>>();
 
-    let normed: Vec<_> = embeddings
-        .iter()
-        .zip(norm.iter())
-        .map(|(wide, &n)| {
-            let norm_wide = Wide::splat(n);
-            let normed: Vec<_> = wide.iter().map(|w| *w / norm_wide).collect();
-            normed
-        })
-        .collect();
-    Ok(normed)
-}
 
 pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let norm = embeddings
@@ -120,22 +31,9 @@ pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     Ok(normed)
 }
 
-fn similarity_matrix_wide(p0: &Vec<Vec<Wide>>) -> anyhow::Result<()> {
-    let normed = normalize_l2_wide(p0)?;
-    let t_normed = transpose_wide(&normed)?;
-    let sim_matrix: Vec<_> = normed
-        .iter()
-        .map(|row| {
-            let res: Vec<_> = t_normed
-                .iter()
-                .map(|col| dot_wide(row, col).unwrap_or(0.0f32))
-                .collect();
-            res
-        })
-        .collect();
 
-    Ok(())
-}
+
+
 
 pub fn similarity_matrix(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let normed = normalize_l2(embeddings)?;
@@ -164,6 +62,12 @@ pub fn cos_similarity(embedding1: &Vec<f32>, embedding2: &Vec<f32>) -> anyhow::R
     Ok(sim)
 }
 
+/// Threshold each coefficient (`>= threshold → 1.0, else 0.0`)
+/// then scale every row so it sums to 1 (stochastic/Markov form).
+///
+/// Returns an error if a row’s sum is 0 or non‑finite.
+
+
 pub fn create_markov_matrix_discrete(
     weights_matrix: &Array2<f32>,
     threshold: f32,
@@ -186,11 +90,22 @@ pub fn create_markov_matrix(weights_matrix: &Array2<f32>) -> anyhow::Result<Arra
         Ok(weights_matrix / row_sum.insert_axis(Axis(1)))
     }
 }
+
+
+
 pub fn softmax(weights_matrix: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let exp_vals = weights_matrix.mapv(f32::exp);
     let exp_sum = exp_vals.sum_axis(Axis(1));
     Ok(exp_vals / exp_sum.insert_axis(Axis(1)))
 }
+
+
+
+/// Numerically‑stable softmax over each row.
+///
+/// * If the matrix is empty the result is empty.
+/// * Every row keeps the same SIMD chunking as the input (no re‑packing).
+
 
 pub fn degree_centrality_scores(
     similarity_matrix: &Array2<f32>,
@@ -198,7 +113,7 @@ pub fn degree_centrality_scores(
     threshold: Option<f32>,
     max_iter: usize,
     normalized: bool,
-) -> anyhow::Result<Array1<f32>> {
+) -> Result<Array1<f32>> {
     if threshold.is_some() {
         let threshold = threshold.unwrap();
         assert!(
@@ -284,14 +199,22 @@ pub fn lexrank(
     lexrank_ts(&embeddings_array, threshold, max_iter)
 }
 
-pub fn lexrank_wide(
-    embeddings: &Vec<Wide>,
+
+
+pub fn lexrank_array(
+    embeddings: &Vec<f32>,
+    no_seq: usize,
+    embed_dim: usize,
     threshold: Option<f32>,
     max_iter: usize,
-) -> anyhow::Result<()> {
-    Ok(())
+) -> anyhow::Result<Vec<(usize, f32)>> {
+    if embeddings.is_empty() {
+        return Ok(vec![]);
+    }
+    let embeddings_array: Array2<f32> =
+        Array::from(embeddings.to_vec()).into_shape_clone((no_seq, embed_dim))?;
+    lexrank_ts(&embeddings_array, threshold, max_iter)
 }
-
 
 pub fn lexrank_ts(
     embeddings_array: &Array2<f32>,
@@ -316,3 +239,5 @@ pub fn lexrank_ts(
     ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     Ok(ranked_sentences)
 }
+
+
