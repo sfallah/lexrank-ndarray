@@ -51,7 +51,7 @@ pub fn wide_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
         b.iter(|| {
             embeds_vec.par_iter().for_each(|(shape, vec)| {
                 let embeddings = flatten_vec_to_wide_matrix(vec, shape[0], shape[1]).unwrap();
-                let result = similarity_matrix_mm(black_box(&embeddings)).unwrap();
+                let result = similarity_matrix_wide_opt_par(black_box(&embeddings)).unwrap();
                 black_box(result);
             });
         });

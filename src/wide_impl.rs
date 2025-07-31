@@ -74,6 +74,45 @@ pub fn min_wide_matrix(matrix: &WideMatrix) -> Option<f32> {
 }
 
 #[inline(always)]
+fn dot_wide_mm(a: &WideRow, b: &WideRow) -> f32 {
+    debug_assert_eq!(a.len(), b.len());
+
+    // Each Wide = 4 *f32*, so k = logical dimension
+    let k = a.len() * LANES;
+
+    // Treat the two WideRow slices as contiguous f32 buffers.
+    // `wide::f32x4` is 16 bytes of four little-endian floats, laid out
+    // sequentially in memory, so this `as *const f32` is sound.
+    let a_ptr = a.as_ptr() as *const f32;
+    let b_ptr = b.as_ptr() as *const f32;
+
+    // Result scalar C (1 × 1 matrix)
+    let mut c = 0.0f32;
+
+    unsafe {
+        // C ← 1 · A · B  +  0 · C
+        // A: (1 × k)   row-major,  row_stride = k, col_stride = 1
+        // B: (k × 1)   row-major,  row_stride = 1, col_stride = 1
+        // C: (1 × 1)   row-major,  row_stride = 1, col_stride = 1
+        sgemm(
+            1,               // m
+            k,               // k
+            1,               // n
+            1.0,             // alpha
+            a_ptr,
+            k as isize, 1,   // A strides
+            b_ptr,
+            1, 1,            // B strides
+            0.0,             // beta
+            &mut c as *mut f32,
+            1, 1,            // C strides
+        );
+    }
+
+    c
+}
+
+#[inline(always)]
 pub fn flatten_vec_to_wide_matrix(vec: &[f32], n_rows: usize, n_cols: usize) -> Result<WideMatrix> {
     if vec.is_empty() || n_rows == 0 || n_cols == 0 {
         return Ok(SmallVec::new());

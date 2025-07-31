@@ -5,7 +5,7 @@ edition = "2021"
 
 
 [dependencies]
-ndarray = { version = "0.16.1" }
+ndarray = { version = "0.16.1", features = ["rayon", "matrixmultiply-threading"] }
 rayon = "1.10.0"
 
 anyhow = "1.0.89"
@@ -22,7 +22,7 @@ serde_json = { version = "1.0.128", optional = true }
 serde = { version = "1.0.208", features = ["derive"], optional = true }
 wide = "0.7.33"
 smallvec = "1.15.1"
-matrixmultiply = "0.3.10"
+matrixmultiply = { version = "0.3.10",features = ["threading"] }
 
 
 [dev-dependencies]
