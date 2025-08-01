@@ -9,8 +9,8 @@ use smallvec::SmallVec;
 
 // ────────────────────────────────────────────────────────────
 // small type helpers – change the inline capacities to taste
-pub type Wide = f32x4;
-pub const LANES: usize = 4;
+pub type Wide = f32x16;
+pub const LANES: usize = 16;
 
 /// A row of SIMD values.
 /// We keep `LANES` items inline; if we push more, SmallVec spills to the heap.
