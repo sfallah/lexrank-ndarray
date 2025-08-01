@@ -6,8 +6,6 @@ pub mod tests {
     use lexrank_ndarray::{cos_similarity, flatten_vec_to_wide_matrix, lexrank_ts, normalize_l2, similarity_matrix, similarity_matrix_mm, similarity_matrix_wide, vec_to_row, wide_matrix_to_array, Wide};
     use ndarray::{array, Array1, Axis};
     use smallvec::smallvec;
-    use ndarray::prelude::*;
-    use ndarray_linalg::*;
 
     #[test]
     fn ndarray_tests() -> anyhow::Result<()> {
@@ -28,10 +26,7 @@ pub mod tests {
         let normed = normalize_l2(&a)?;
         println!("{:8.12}", normed);
 
-        let a_mut = a.clone();
-        let (a_normed1, a_norms) = normalize(a_mut, NormalizeAxis::Row);
-        println!("linalg-norm: {:8.12}", a_normed1);
-        println!("linalg-norms: {:8.12}", ndarray::Array::from(a_norms));
+
         Ok(())
     }
 

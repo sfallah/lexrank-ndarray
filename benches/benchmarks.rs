@@ -7,7 +7,6 @@ use rayon::prelude::*;
 use std::hint::black_box;
 use std::thread;
 use std::time::{Duration, Instant};
-use ndarray_linalg::NormalizeAxis;
 
 pub fn ndarray_normalize_l2(c: &mut Criterion, dataset: &str, tensor_file: &str) {
     let splits = load_splits_data(tensor_file).unwrap();
@@ -26,22 +25,7 @@ pub fn ndarray_normalize_l2(c: &mut Criterion, dataset: &str, tensor_file: &str)
     });
 }
 
-pub fn ndarray_linalg_normalize_l2(c: &mut Criterion, dataset: &str, tensor_file: &str) {
-    let splits = load_splits_data(tensor_file).unwrap();
-    let embeds_vec: Vec<_> = splits
-        .iter()
-        .map(|split| load_split_vec(tensor_file, split).unwrap())
-        .collect();
-    c.bench_function(format!("ndarray_linalg_normalize_l2 {}", dataset).as_str(), |b| {
-        b.iter(|| {
-            black_box(embeds_vec.par_iter()).for_each(|(shape, vec)| {
-                let embeddings = array2_from_vec(vec, shape).unwrap();
-                let result = ndarray_linalg::normalize(black_box(embeddings), NormalizeAxis::Row);
-                black_box(result);
-            });
-        });
-    });
-}
+
 pub fn ndarray_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
     let splits = load_splits_data(tensor_file).unwrap();
     let embeds_vec: Vec<_> = splits
@@ -165,7 +149,6 @@ pub fn benches() {
     for (dataset, tensor_file) in data_set_map.iter() {
         ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
         wide_normalize_l2(&mut criterion, dataset, tensor_file);
-        ndarray_linalg_normalize_l2(&mut criterion, dataset, tensor_file);
 
         ndarray_cosine_sim(&mut criterion, dataset, tensor_file);
         wide_cosine_sim(&mut criterion, dataset, tensor_file);
