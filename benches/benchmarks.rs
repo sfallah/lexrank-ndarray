@@ -135,6 +135,7 @@ pub fn ndarray_lexrank(c: &mut Criterion, dataset: &str, tensor_file: &str) {
 }
 
 pub fn benches() {
+    /*
     let num_threads = num_cpus::get_physical(); // Replace with the number of threads you want
 
     // Set the custom ThreadPool as the global Rayon runtime
@@ -142,6 +143,8 @@ pub fn benches() {
         .num_threads(num_threads)
         .build()
         .unwrap();
+
+     */
 
     let mut criterion: Criterion<_> = Criterion::default()
         .sample_size(10)
