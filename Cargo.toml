@@ -24,6 +24,7 @@ serde = { version = "1.0.208", features = ["derive"], optional = true }
 wide = "0.7.33"
 smallvec = "1.15.1"
 matrixmultiply = { version = "0.3.10",features = ["threading"] }
+num_cpus = "1.17.0"
 
 
 [dev-dependencies]
