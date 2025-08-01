@@ -394,7 +394,7 @@ pub fn similarity_matrix_wide_opt_par(p0: &WideMatrix) -> Result<Vec<f32>> {
                 let row_vec = &normed[i];
 
                 for j in (i + 1)..n {
-                    let sim = dot_wide_par(row_vec, &normed[j]);
+                    let sim = dot_wide(row_vec, &normed[j]);
                     row_slice[j] = sim; // write only j ≥ i
                 }
             });
