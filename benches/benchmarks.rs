@@ -2,8 +2,14 @@ use criterion::{criterion_main, Criterion};
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
-use lexrank_ndarray::{flatten_vec_to_wide_matrix, lexrank_array, normalize_l2, normalize_l2_wide, normalize_l2_wide_new, normalize_l2_wide_par, similarity_matrix, similarity_matrix_mm, similarity_matrix_wide, similarity_matrix_wide_opt, similarity_matrix_wide_opt_par, similarity_matrix_wide_par};
+use lexrank_ndarray::{
+    flatten_vec_to_wide_matrix, lexrank_array, normalize_l2, normalize_l2_wide,
+    normalize_l2_wide_new, normalize_l2_wide_par, similarity_matrix, similarity_matrix_mm,
+    similarity_matrix_wide, similarity_matrix_wide_opt, similarity_matrix_wide_opt_par,
+    similarity_matrix_wide_par,
+};
 use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use std::hint::black_box;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -24,7 +30,6 @@ pub fn ndarray_normalize_l2(c: &mut Criterion, dataset: &str, tensor_file: &str)
         });
     });
 }
-
 
 pub fn ndarray_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
     let splits = load_splits_data(tensor_file).unwrap();
@@ -130,6 +135,14 @@ pub fn ndarray_lexrank(c: &mut Criterion, dataset: &str, tensor_file: &str) {
 }
 
 pub fn benches() {
+    let num_threads = 4; // Replace with the number of threads you want
+
+    // Set the custom ThreadPool as the global Rayon runtime
+    ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .build_global()
+        .unwrap();
+
     let mut criterion: Criterion<_> = Criterion::default()
         .sample_size(10)
         .measurement_time(std::time::Duration::from_secs(20))
