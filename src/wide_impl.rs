@@ -1,6 +1,6 @@
 use core::simd::f32x4;
 use rayon::prelude::*;
-use std::ops::{Div, DivAssign, MulAssign};
+use std::ops::{AddAssign, Div, DivAssign, MulAssign};
 use std::simd::prelude::*;
 use std::simd::StdFloat;
 // SIMD vector type for 8 × f32
@@ -480,11 +480,11 @@ pub fn wide_matrix_row_sum(mat: &WideMatrix) -> Result<SmallVec<[f32; LANES]>> {
 
 #[inline(always)]
 fn dot_wide(a: &WideRow, b: &WideRow) -> f32 {
-    let mut acc = 0.0;
-    for (x, y) in a.iter().zip(b.iter()) {
-        acc += (*x * *y).reduce_sum(); // element‑wise multiply and lane‑wise sum
+    let mut acc = Wide::splat(0.0);
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        acc.add_assign( x * y) // element‑wise multiply and lane‑wise sum
     }
-    acc // lane‑wise sum → scalar
+    acc.reduce_sum() // lane‑wise sum → scalar
 }
 
 #[inline(always)]
