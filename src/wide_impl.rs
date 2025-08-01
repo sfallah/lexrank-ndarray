@@ -6,7 +6,7 @@ use std::simd::StdFloat;
 // SIMD vector type for 8 × f32
 use anyhow::{anyhow, Result};
 use ndarray::{Array, Array2};
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 // SIMD lane = 4 × f32
 
 // ────────────────────────────────────────────────────────────
@@ -371,10 +371,10 @@ pub fn similarity_matrix_mm(p0: &WideMatrix) -> Result<WideMatrix> {
 ///   After all threads finish we mirror the values to the lower triangle.
 /// * Returns a dense `WideMatrix` laid out like the input helpers
 ///   (`flatten_vec_to_wide_matrix` packs the flat `Vec<f32>` into SIMD).
-pub fn similarity_matrix_wide_opt_par(p0: &WideMatrix) -> Result<WideMatrix> {
+pub fn similarity_matrix_wide_opt_par(p0: &WideMatrix) -> Result<Vec<f32>> {
     let n = p0.len();
     if n == 0 {
-        return Ok(SmallVec::new());
+        return Ok(Vec::new());
     }
     let mut normed = p0.clone();
     normalize_l2_wide_new(&mut normed);
@@ -384,7 +384,7 @@ pub fn similarity_matrix_wide_opt_par(p0: &WideMatrix) -> Result<WideMatrix> {
     let mut sims = vec![0.0f32; n * n];
 
     // 2. fill one row per Rayon job (upper triangle + diagonal)
-    sims.par_chunks_mut(n)
+    sims.chunks_mut(n)
         .enumerate()
         .for_each(|(i, row_slice)| {
             row_slice[i] = 1.0; // diagonal
@@ -404,7 +404,7 @@ pub fn similarity_matrix_wide_opt_par(p0: &WideMatrix) -> Result<WideMatrix> {
     }
 
     // 4. pack the flat buffer back into a WideMatrix
-    Ok(flatten_vec_to_wide_matrix(&sims, n, n)?)
+    Ok(sims)
 }
 
 pub fn create_markov_matrix_discrete_wide(
