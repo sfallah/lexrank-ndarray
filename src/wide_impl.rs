@@ -1,6 +1,8 @@
 use core::simd::f32x4;
 use rayon::prelude::*;
+use std::ops::{Div, DivAssign, MulAssign};
 use std::simd::prelude::*;
+use std::simd::StdFloat;
 // SIMD vector type for 8 × f32
 use anyhow::{anyhow, Result};
 use ndarray::{Array, Array2};
@@ -28,6 +30,21 @@ pub fn vec_to_row(v: &[f32]) -> WideRow {
         out.push(Wide::load_or(chunk, Wide::splat(0.0)));
     }
     out
+}
+
+pub fn wide_matrix_to_array(matrix: &WideMatrix) -> Array2<f32> {
+    let n_rows = matrix.len();
+    if n_rows == 0 {
+        return Array2::default((0, 0));
+    }
+    let n_cols = matrix[0].len() * LANES; // each WideRow has `LANES` f32 values
+    let mut flat: Vec<f32> = Vec::with_capacity(n_rows * n_cols);
+    for row in matrix {
+        for wide in row {
+            flat.extend_from_slice(&wide.to_array());
+        }
+    }
+    Array::from_shape_vec((n_rows, n_cols), flat).unwrap()
 }
 
 pub fn max_wide_matrix(matrix: &WideMatrix) -> Option<f32> {
@@ -95,17 +112,20 @@ fn dot_wide_mm(a: &WideRow, b: &WideRow) -> f32 {
         // B: (k × 1)   row-major,  row_stride = 1, col_stride = 1
         // C: (1 × 1)   row-major,  row_stride = 1, col_stride = 1
         sgemm(
-            1,               // m
-            k,               // k
-            1,               // n
-            1.0,             // alpha
+            1,   // m
+            k,   // k
+            1,   // n
+            1.0, // alpha
             a_ptr,
-            k as isize, 1,   // A strides
+            k as isize,
+            1, // A strides
             b_ptr,
-            1, 1,            // B strides
-            0.0,             // beta
+            1,
+            1,   // B strides
+            0.0, // beta
             &mut c as *mut f32,
-            1, 1,            // C strides
+            1,
+            1, // C strides
         );
     }
 
@@ -155,27 +175,42 @@ pub fn normalize_l2_wide(matrix: &WideMatrix) -> Result<WideMatrix> {
 
     for row in matrix {
         // ---------- 1. compute this row's squared‑L2 norm ----------
-        let mut row_sum_sq = 0.0_f32;
+        let mut row_sum = Wide::splat(0.0); // accumulate the sum of squares
         for &chunk in row {
-            row_sum_sq += (chunk * chunk).reduce_sum(); // four lanes at once
+            row_sum = chunk.mul_add(chunk, row_sum); // four lanes at once
         }
-
-        if row_sum_sq == 0.0 || !row_sum_sq.is_finite() {
-            return Err(anyhow!("row has zero or non‑finite L2 norm"));
-        }
+        let row_norm = row_sum.reduce_sum().sqrt(); // horizontal sum and sqrt
 
         // ---------- 2. scale this row only ----------
-        let scale = Wide::splat(1.0 / row_sum_sq.sqrt()); // multiply beats divide
+        //let scale = Wide::splat(1.0 / row_norm); // multiply beats divide
         let mut normed_row: WideRow = SmallVec::with_capacity(row.len());
+        let scale = Wide::splat(row_norm);
 
         for &chunk in row {
-            normed_row.push(chunk * scale);
+            normed_row.push(chunk.div(scale)); // divide each lane by the norm
         }
 
         out.push(normed_row);
     }
 
     Ok(out)
+}
+
+#[inline]
+pub fn normalize_l2_wide_new(matrix: &mut WideMatrix) {
+    matrix.iter_mut().for_each(|row| {
+        // 1. SIMD accumulator for ∑x²
+        let mut acc = Wide::splat(0.0);
+        for &chunk in row.iter() {
+            acc += chunk * chunk;
+        }
+        let inv = Wide::splat(1.0 / acc.reduce_sum().sqrt());
+
+        // 2. scale
+        for chunk in row.iter_mut() {
+            chunk.mul_assign(inv); // multiply each lane by the inverse norm
+        }
+    })
 }
 
 /// Row‑wise L2 normalisation — now parallel with Rayon.
@@ -278,19 +313,20 @@ pub fn similarity_matrix_wide_opt(p0: &WideMatrix) -> Result<WideMatrix> {
     Ok(flatten_vec_to_wide_matrix(&sims, n, n)?)
 }
 
-use matrixmultiply::sgemm;           // crate = "matrixmultiply" in Cargo.toml
-
+use matrixmultiply::sgemm; // crate = "matrixmultiply" in Cargo.toml
 
 pub fn similarity_matrix_mm(p0: &WideMatrix) -> Result<WideMatrix> {
     // 0.  L2 normalise as before (still SIMD & optionally Rayon)
-    let normed = normalize_l2_wide(p0)?;
-    let rows   = normed.len();
-    let cols   = normed[0].len() * 4;           // SIMD lanes → scalar width
+    let rows = p0.len();
+    let cols = p0[0].len() * LANES; // SIMD lanes → scalar width
+    let mut normed = p0.clone();
+    normalize_l2_wide_new(&mut normed);
 
     // 1.  Flatten into one contiguous row‑major matrix A (rows × cols)
     let mut a = Vec::<f32>::with_capacity(rows * cols);
     for row in &normed {
-        for chunk in row {                      // Wide → [f32; 4]
+        for chunk in row {
+            // Wide → [f32; 4]
             a.extend_from_slice(&chunk.to_array());
         }
     }
@@ -304,14 +340,20 @@ pub fn similarity_matrix_mm(p0: &WideMatrix) -> Result<WideMatrix> {
         // row‑major layout ⇒ row_stride = cols, col_stride = 1
         // Aᵀ therefore has row_stride = 1, col_stride = cols
         sgemm(
-            rows,       // m
-            cols,       // k
-            rows,       // n
-            1.0,        // α
-            a.as_ptr(), cols as isize, 1,          // A
-            a.as_ptr(), 1, cols as isize,          // B = Aᵀ
-            0.0,        // β
-            c.as_mut_ptr(), rows as isize, 1,      // C (row‑major)
+            rows, // m
+            cols, // k
+            rows, // n
+            1.0,  // α
+            a.as_ptr(),
+            cols as isize,
+            1, // A
+            a.as_ptr(),
+            1,
+            cols as isize, // B = Aᵀ
+            0.0,           // β
+            c.as_mut_ptr(),
+            rows as isize,
+            1, // C (row‑major)
         );
     }
     // NOTE: enable the "threading" feature on matrixmultiply if you want it
@@ -329,11 +371,13 @@ pub fn similarity_matrix_mm(p0: &WideMatrix) -> Result<WideMatrix> {
 /// * Returns a dense `WideMatrix` laid out like the input helpers
 ///   (`flatten_vec_to_wide_matrix` packs the flat `Vec<f32>` into SIMD).
 pub fn similarity_matrix_wide_opt_par(p0: &WideMatrix) -> Result<WideMatrix> {
-    let normed = normalize_l2_wide(p0)?;
-    let n = normed.len();
+    let n = p0.len();
     if n == 0 {
         return Ok(SmallVec::new());
     }
+    let mut normed = p0.clone();
+    normalize_l2_wide_new(&mut normed);
+    
 
     // 1. pre‑allocate the whole N×N buffer
     let mut sims = vec![0.0f32; n * n];
@@ -458,12 +502,12 @@ fn dot_wide_par(a: &WideRow, b: &WideRow) -> f32 {
 
     // parallel path ---------------------------------------------------------
     let acc = a
-        .par_iter()               // &Wide → ParallelIterator
-        .zip(b.par_iter())        // pair up the registers
-        .map(|(&x, &y)| x * y)    // element‑wise product
+        .par_iter() // &Wide → ParallelIterator
+        .zip(b.par_iter()) // pair up the registers
+        .map(|(&x, &y)| x * y) // element‑wise product
         .reduce(|| Wide::splat(0.0), |s, v| s + v);
 
-    acc.reduce_sum()              // single horizontal reduction → scalar
+    acc.reduce_sum() // single horizontal reduction → scalar
 }
 
 #[inline(always)]

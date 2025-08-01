@@ -3,7 +3,7 @@ pub mod tests {
     use lexrank_ndarray::testing::{
         f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
     };
-    use lexrank_ndarray::{cos_similarity, flatten_vec_to_wide_matrix, lexrank_ts, normalize_l2, similarity_matrix, similarity_matrix_wide, vec_to_row, Wide};
+    use lexrank_ndarray::{cos_similarity, flatten_vec_to_wide_matrix, lexrank_ts, normalize_l2, similarity_matrix, similarity_matrix_mm, similarity_matrix_wide, vec_to_row, wide_matrix_to_array, Wide};
     use ndarray::{array, Array1, Axis};
     use smallvec::smallvec;
 
@@ -56,6 +56,11 @@ pub mod tests {
         let sim_matrix_wide = similarity_matrix_wide(&embeds_wide)?;
         assert_eq!(sim_matrix_wide.shape(), [2, 2]);
         println!("{:8.16}", sim_matrix_wide);
+
+        let embeds_wide_par = flatten_vec_to_wide_matrix(&embeds.flatten().to_vec(), 2, 5)?;
+        let similarity_matrix_mm_res = similarity_matrix_mm(&embeds_wide_par)?;
+        assert_eq!((similarity_matrix_mm_res.len(),similarity_matrix_mm_res[0].len()), (2, 1)); // two rows, one simd each
+        println!("{:8.16}", wide_matrix_to_array(&similarity_matrix_mm_res));
 
         Ok(())
     }

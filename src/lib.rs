@@ -18,7 +18,7 @@ mod wide_impl;
 pub use wide_impl::{
     flatten_vec_to_wide_matrix, similarity_matrix_mm, similarity_matrix_wide,
     similarity_matrix_wide_opt, similarity_matrix_wide_opt_par, similarity_matrix_wide_par,
-    vec_to_row, Wide, WideMatrix, WideRow,
+    vec_to_row, Wide, WideMatrix, WideRow,normalize_l2_wide, normalize_l2_wide_par, normalize_l2_wide_new,wide_matrix_to_array
 };
 
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {

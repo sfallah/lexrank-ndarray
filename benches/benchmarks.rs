@@ -2,7 +2,7 @@ use criterion::{criterion_main, Criterion};
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
-use lexrank_ndarray::{flatten_vec_to_wide_matrix, lexrank_array, normalize_l2, similarity_matrix, similarity_matrix_mm, similarity_matrix_wide, similarity_matrix_wide_opt, similarity_matrix_wide_opt_par, similarity_matrix_wide_par};
+use lexrank_ndarray::{flatten_vec_to_wide_matrix, lexrank_array, normalize_l2, normalize_l2_wide, normalize_l2_wide_new, normalize_l2_wide_par, similarity_matrix, similarity_matrix_mm, similarity_matrix_wide, similarity_matrix_wide_opt, similarity_matrix_wide_opt_par, similarity_matrix_wide_par};
 use rayon::prelude::*;
 use std::hint::black_box;
 use std::thread;
@@ -53,6 +53,22 @@ pub fn wide_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
                 let embeddings = flatten_vec_to_wide_matrix(vec, shape[0], shape[1]).unwrap();
                 let result = similarity_matrix_wide_opt_par(black_box(&embeddings)).unwrap();
                 black_box(result);
+            });
+        });
+    });
+}
+
+pub fn wide_normalize_l2(c: &mut Criterion, dataset: &str, tensor_file: &str) {
+    let splits = load_splits_data(tensor_file).unwrap();
+    let embeds_vec: Vec<_> = splits
+        .iter()
+        .map(|split| load_split_vec(tensor_file, split).unwrap())
+        .collect();
+    c.bench_function(format!("wide_normalize_l2 {}", dataset).as_str(), |b| {
+        b.iter(|| {
+            embeds_vec.par_iter().for_each(|(shape, vec)| {
+                let mut embeddings = flatten_vec_to_wide_matrix(vec, shape[0], shape[1]).unwrap();
+                normalize_l2_wide_new(&mut embeddings);
             });
         });
     });
@@ -112,7 +128,9 @@ pub fn benches() {
            //("multilingual-e5-large-instruct", "tests/test_data/superlinear_embeddings/multilingual-e5-large-instruct/"),
     ];
     for (dataset, tensor_file) in data_set_map.iter() {
-        //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
+        ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
+        wide_normalize_l2(&mut criterion, dataset, tensor_file);
+
         ndarray_cosine_sim(&mut criterion, dataset, tensor_file);
         wide_cosine_sim(&mut criterion, dataset, tensor_file);
         //ndarray_lexrank(&mut criterion, dataset, tensor_file);
