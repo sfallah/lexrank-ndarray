@@ -31,7 +31,7 @@ pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
         .sum_axis(Axis(1))
         .sqrt()
         .clamp(1e-12, f32::INFINITY);
-    let normed = embeddings / norm.insert_axis(Axis(1));
+    let normed = embeddings * norm.insert_axis(Axis(1)).recip();
     Ok(normed)
 }
 
