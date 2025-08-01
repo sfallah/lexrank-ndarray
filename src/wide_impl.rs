@@ -384,18 +384,32 @@ pub fn similarity_matrix_wide_opt_par(p0: &WideMatrix) -> Result<Vec<f32>> {
     let mut sims = vec![0.0f32; n * n];
 
     // 2. fill one row per Rayon job (upper triangle + diagonal)
-    sims.chunks_mut(n)
-        .enumerate()
-        .for_each(|(i, row_slice)| {
-            row_slice[i] = 1.0; // diagonal
+    if n > 256 {
+        // heuristic: if n is large, use parallelism
+        // (otherwise the overhead of spawning threads is too high)
+        sims.par_chunks_mut(n)
+            .enumerate()
+            .for_each(|(i, row_slice)| {
+                row_slice[i] = 1.0; // diagonal
+                let row_vec = &normed[i];
+
+                for j in (i + 1)..n {
+                    let sim = dot_wide_par(row_vec, &normed[j]);
+                    row_slice[j] = sim; // write only j ≥ i
+                }
+            });
+    } else {
+        // small n: single‑threaded
+        for i in 0..n {
+            sims[i * n + i] = 1.0; // diagonal
             let row_vec = &normed[i];
 
             for j in (i + 1)..n {
                 let sim = dot_wide(row_vec, &normed[j]);
-                row_slice[j] = sim; // write only j ≥ i
+                sims[i * n + j] = sim; // write only j ≥ i
             }
-        });
-
+        }
+    }
     // 3. single‑threaded mirror to the lower triangle
     for i in 0..n {
         for j in (i + 1)..n {
