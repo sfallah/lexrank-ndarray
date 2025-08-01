@@ -202,9 +202,10 @@ pub fn normalize_l2_wide_new(matrix: &mut WideMatrix) {
         // 1. SIMD accumulator for ∑x²
         let mut acc = Wide::splat(0.0);
         for &chunk in row.iter() {
-            acc += chunk * chunk;
+            acc.add_assign( chunk * chunk); // accumulate the sum of squares
         }
-        let inv = Wide::splat(1.0 / acc.reduce_sum().sqrt());
+        let scale = acc.reduce_sum().sqrt().clamp(1e-12, f32::INFINITY); // avoid division by zero
+        let inv = Wide::splat(scale).recip(); // inverse norm
 
         // 2. scale
         for chunk in row.iter_mut() {
