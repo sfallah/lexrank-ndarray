@@ -6,6 +6,34 @@ pub mod tests {
     use lexrank_ndarray::{cos_similarity, flatten_vec_to_wide_matrix, lexrank_ts, normalize_l2, similarity_matrix, similarity_matrix_mm, similarity_matrix_wide, vec_to_row, wide_matrix_to_array, Wide};
     use ndarray::{array, Array1, Axis};
     use smallvec::smallvec;
+    use ndarray::prelude::*;
+    use ndarray_linalg::*;
+
+    #[test]
+    fn ndarray_tests() -> anyhow::Result<()> {
+        let a = array![[1.0f32, 2., 3.], [4., 5., 6.]];
+        println!("{:8.12}", a);
+        let a_norms = a
+            .pow2()
+            .sum_axis(Axis(1))
+            .sqrt()
+            .clamp(1e-12, f32::INFINITY);
+        println!("{:8.12}", a_norms);
+        let a_norms = a_norms.insert_axis(Axis(1));
+        println!("{:8.12}", a_norms);
+        let a_norms = a_norms.recip();
+        println!("recip {:8.12}", a_norms);
+        let a_normed = a.clone() * a_norms;
+        println!("{:8.12}", a_normed);
+        let normed = normalize_l2(&a)?;
+        println!("{:8.12}", normed);
+
+        let a_mut = a.clone();
+        let (a_normed1, a_norms) = normalize(a_mut, NormalizeAxis::Row);
+        println!("linalg-norm: {:8.12}", a_normed1);
+        println!("linalg-norms: {:8.12}", ndarray::Array::from(a_norms));
+        Ok(())
+    }
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
