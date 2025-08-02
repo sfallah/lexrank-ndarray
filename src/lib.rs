@@ -298,3 +298,63 @@ pub fn similarity_matrix_par_new(embeddings: &Array2<f32>) -> anyhow::Result<Arr
 
     Ok(sim)
 }
+
+#[cfg(feature = "accelerate")]
+use cblas::{
+    Layout, Transpose,          // enum wrappers
+    sgemm, sdot, snrm2,         // C-level calls exposed safely
+};
+
+/// Single-precision cosine similarity of two equal-length vectors.
+#[cfg(feature = "accelerate")]
+pub fn cosine_f32(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(a.len(), b.len());
+    let n = a.len() as i32;
+
+    // BLAS level-1 already has both primitives we need:
+    let dot  = unsafe { sdot(n, a, 1, b, 1) };
+    let na   = unsafe { snrm2(n, a, 1) };
+    let nb   = unsafe { snrm2(n, b, 1) };
+
+    dot / (na * nb)
+}
+/// # Parameters
+/// * `matrix` – flat row-major buffer of size `r × c`
+/// * `r` – number of rows (vectors)
+/// * `c` – dimensionality of each vector
+#[cfg(feature = "accelerate")]
+pub fn cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
+    assert_eq!(matrix.len(), r * c);
+
+    // ❶ allocate the square result (row-major)
+    let mut result = vec![0.0f32; r * r];
+
+    // ❷ process each *row slice* of `result` in parallel
+    //
+    // `par_chunks_mut(r)` splits the buffer into disjoint mutable chunks,
+    // one per row, so every thread owns a unique region and no locks are needed.
+    result
+        .par_chunks_mut(r)        // &mut [f32] for one row
+        .enumerate()              // (i, row_i)
+        .for_each(|(i, row_i)| {
+            // -- diagonal --
+            row_i[i] = 1.0;
+
+            // -- upper triangle: j > i --
+            let a = &matrix[i * c .. (i + 1) * c];
+            for j in (i + 1)..r {
+                let b = &matrix[j * c .. (j + 1) * c];
+                row_i[j] = cosine_f32(a, b);      // upper-tri entry
+            }
+        });
+
+    // ❸ mirror the upper triangle → lower triangle (cheap, serial)
+    for i in 0..r {
+        for j in (i + 1)..r {
+            let sim = result[i * r + j];
+            result[j * r + i] = sim;
+        }
+    }
+
+    result
+}

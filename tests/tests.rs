@@ -1,10 +1,11 @@
 #[cfg(test)]
 pub mod tests {
-    use lexrank_ndarray::testing::{
+    use lexrank_ndarray::cosine_f32_matrix;
+use lexrank_ndarray::testing::{
         f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
     };
     use lexrank_ndarray::{cos_similarity, flatten_vec_to_wide_matrix, lexrank_ts, normalize_l2, normalize_l2_par, similarity_matrix, similarity_matrix_wide, vec_to_row, Wide};
-    use ndarray::{array, Array1, Axis};
+    use ndarray::{array, Array1, Array, Axis};
     use smallvec::smallvec;
 
     #[test]
@@ -63,6 +64,23 @@ pub mod tests {
         assert_eq!(sim_matrix_wide.shape(), [2, 2]);
         println!("{:8.16}", sim_matrix_wide);
 
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "accelerate")]
+
+    fn cblas_cosine_sim() -> anyhow::Result<()> {
+        let mut embeds = Array1::range(0f32, 10., 1.).into_shape_clone((2, 5))?;
+        let sim_matrix = similarity_matrix(&mut embeds)?;
+        assert_eq!(sim_matrix.shape(), [2, 2]);
+        println!("{:8.16}", sim_matrix);
+
+        let embeds_vec = embeds.flatten().to_vec();
+        let cblas_sim = cosine_f32_matrix(&embeds_vec, 2, 5);
+        assert_eq!(cblas_sim.len(), 2 * 2 as usize);
+        let sim_array = Array::from_shape_vec((2, 2), cblas_sim)?;
+        println!("{:8.16}", sim_array);
         Ok(())
     }
 

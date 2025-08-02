@@ -131,6 +131,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
+name = "cblas"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7c834e5b5c32a6dbcdb917788d0c38473e1ae7076ff2f4011eb96c5fec20eef"
+dependencies = [
+ "cblas-sys 0.2.0",
+ "libc",
+ "num-complex",
+]
+
+[[package]]
 name = "cblas-sys"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -138,6 +149,21 @@ checksum = "b6feecd82cce51b0204cf063f0041d69f24ce83f680d87514b004248e7b0fa65"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "cblas-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8354a31ad0d37f735e74c1973343c99dde4461ea8626a2b8d4fea9e06b987255"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "cblas-sys"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7211d558677a4f41a6c0815295cff14d798209b631d8390586efc2f6b98b0f16"
 
 [[package]]
 name = "cc"
@@ -651,6 +677,8 @@ dependencies = [
  "anyhow",
  "blas-src",
  "blis-src",
+ "cblas",
+ "cblas-sys 0.3.0",
  "criterion",
  "intel-mkl-src",
  "matrixmultiply",
@@ -744,7 +772,7 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "882ed72dce9365842bf196bdeedf5055305f11fc8c03dee7bb0194a6cad34841"
 dependencies = [
- "cblas-sys",
+ "cblas-sys 0.1.4",
  "libc",
  "matrixmultiply",
  "num-complex",
