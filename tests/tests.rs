@@ -3,7 +3,7 @@ pub mod tests {
     use lexrank_ndarray::testing::{
         f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
     };
-    use lexrank_ndarray::{cos_similarity, flatten_vec_to_wide_matrix, lexrank_ts, normalize_l2, similarity_matrix, similarity_matrix_wide, vec_to_row, Wide};
+    use lexrank_ndarray::{cos_similarity, flatten_vec_to_wide_matrix, lexrank_ts, normalize_l2, normalize_l2_par, similarity_matrix, similarity_matrix_wide, vec_to_row, Wide};
     use ndarray::{array, Array1, Axis};
     use smallvec::smallvec;
 
@@ -36,9 +36,15 @@ pub mod tests {
     #[test]
     fn ndarray_cosine_sim_wide() -> anyhow::Result<()> {
         let mut embeds = Array1::range(0f32, 10., 1.).into_shape_clone((2, 5))?;
-        let embeds_normed = normalize_l2(&mut embeds)?;
+        let embeds_normed = normalize_l2(&embeds)?;
         assert_eq!(embeds_normed.shape(), [2, 5]);
         println!("{:8.16}", embeds_normed);
+
+        println!("embeds {:8.16}", embeds);
+        let mut normed_par = embeds.clone();
+        normalize_l2_par(&mut normed_par);
+        assert_eq!(normed_par.shape(), [2, 5]);
+        println!("normed_par {:8.16}", normed_par);
 
         let sim_matrix = similarity_matrix(&mut embeds)?;
         assert_eq!(sim_matrix.shape(), [2, 2]);
