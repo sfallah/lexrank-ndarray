@@ -160,3 +160,4 @@ pub fn cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
 
         result
     }
+}
