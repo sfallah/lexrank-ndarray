@@ -91,14 +91,10 @@ pub fn norm2_f32(v: &[f32]) -> f32 {
 pub fn cosine_f32_opt(a: &[f32], b: &[f32], a_norm: f32, b_norm: f32) -> f32 {
     assert_eq!(a.len(), b.len(), "dimension mismatch");
 
-    let dot = if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("fma") {
-        //print!("Using AVX-512 dot product... ");
-        unsafe { dot_f32_avx512(a.as_ptr(), b.as_ptr(), a.len()) }
-    } else {
+    let dot = {
         #[cfg(all(target_arch = "x86_64"))]
         {
             if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
-                //print!("Using AVX2 dot product... ");
                 // SAFETY: runtime detection above.
                 unsafe { dot_f32_avx2(a.as_ptr(), b.as_ptr(), a.len()) }
             } else {
@@ -110,8 +106,6 @@ pub fn cosine_f32_opt(a: &[f32], b: &[f32], a_norm: f32, b_norm: f32) -> f32 {
             a.iter().zip(b).map(|(&x, &y)| x * y).sum()
         }
     };
-
-
 
     dot / (a_norm * b_norm)
 }
@@ -144,32 +138,4 @@ pub fn cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
         }
     }
     result
-}
-
-/// Dot-product of `len` f32s with AVX-512 + FMA.  
-/// Falls back to AVX2 / scalar at call-site.
-#[target_feature(enable = "avx512f,fma")]
-unsafe fn dot_f32_avx512(a: *const f32, b: *const f32, len: usize) -> f32 {
-    let mut i = 0;
-    let mut acc = _mm512_setzero_ps();
-
-    // 16-float chunks
-    while i + 16 <= len {
-        let va = _mm512_loadu_ps(a.add(i));
-        let vb = _mm512_loadu_ps(b.add(i));
-        acc = _mm512_fmadd_ps(va, vb, acc);
-        i += 16;
-    }
-
-    // Tail: masked load handles 0-15 remaining elements
-    let rem = (len - i) as i32;
-    if rem > 0 {
-        let mask: __mmask16 = (!0u16) >> (16 - rem);
-        let va = _mm512_maskz_loadu_ps(mask, a.add(i));
-        let vb = _mm512_maskz_loadu_ps(mask, b.add(i));
-        acc = _mm512_fmadd_ps(va, vb, acc);
-    }
-
-    // Horizontal add (portable across stable/nightly)
-    _mm512_reduce_add_ps(acc)
 }
