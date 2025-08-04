@@ -129,7 +129,7 @@ fn normalize_rows_l2(src: &[f32], r: usize, c: usize, use_avx: bool) -> Vec<f32>
     // the global allocator gives ≥ 16 B alignment and `_mm256_loadu_ps` is cheap.
     let mut dst = vec![0f32; r * c];
 
-    dst.par_chunks_mut(c).enumerate().for_each(|(i, row_dst)| {
+    dst.chunks_mut(c).enumerate().for_each(|(i, row_dst)| {
         let row_src = &src[i * c..(i + 1) * c];
         let norm = if use_avx && c >= 32 {
             unsafe { sumsquares_f32_avx2_unrolled(row_src.as_ptr(), c) }.sqrt()
@@ -188,7 +188,7 @@ pub fn cosine_similarity_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> 
 
     const BLOCK: usize = 32;   // number of rows per task - tune if needed
 
-    sim.par_chunks_mut(r).enumerate().for_each(|(i, sim_row)| {
+    sim.chunks_mut(r).enumerate().for_each(|(i, sim_row)| {
         let row_i = &normed[i * c..(i + 1) * c];
         sim_row[i] = 1.0;  // diagonal
         for j in (i + 1)..r {
