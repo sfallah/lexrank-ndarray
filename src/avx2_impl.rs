@@ -123,7 +123,7 @@ pub fn cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     let mut result = vec![0.0f32; r * r];
 
     let mut norms = vec![0.0f32; r];
-    norms.iter_mut().enumerate().for_each(|(i, norm)| {
+    norms.par_iter_mut().enumerate().for_each(|(i, norm)| {
         // -- row i norm --
         let row_i = &matrix[i * c..(i + 1) * c];
         *norm = norm2_f32(row_i); // compute row i norm
