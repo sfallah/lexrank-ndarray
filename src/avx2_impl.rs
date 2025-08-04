@@ -92,13 +92,13 @@ pub fn cosine_f32_opt(a: &[f32], b: &[f32], a_norm: f32, b_norm: f32) -> f32 {
     assert_eq!(a.len(), b.len(), "dimension mismatch");
 
     let dot = if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("fma") {
-        print!("Using AVX-512 dot product... ");
+        //print!("Using AVX-512 dot product... ");
         unsafe { dot_f32_avx512(a.as_ptr(), b.as_ptr(), a.len()) }
     } else {
         #[cfg(all(target_arch = "x86_64"))]
         {
             if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
-                print!("Using AVX2 dot product... ");
+                //print!("Using AVX2 dot product... ");
                 // SAFETY: runtime detection above.
                 unsafe { dot_f32_avx2(a.as_ptr(), b.as_ptr(), a.len()) }
             } else {
