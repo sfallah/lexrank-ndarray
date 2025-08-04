@@ -29,7 +29,8 @@ pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
         .pow2()
         .sum_axis(Axis(1))
         .sqrt()
-        .mapv(|x| if x > 0.0 { x } else { 1f32 }).recip();
+        .mapv(|x| if x > 0.0 { x } else { 1f32 })
+        .recip();
     let normed = embeddings * norm.insert_axis(Axis(1));
     Ok(normed)
 }
@@ -253,7 +254,6 @@ pub fn lexrank_ts(
     Ok(ranked_sentences)
 }
 
-
 /// Cosine-similarity matrix (row⋅row) with upper-triangle parallel fill.
 ///
 /// * `embeddings.shape()` == (n, d)
@@ -261,8 +261,8 @@ pub fn lexrank_ts(
 #[inline]
 pub fn similarity_matrix_par_new(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     // 1.  Normalise rows in a single owned buffer
-    let mut normed = embeddings.to_owned();      // one allocation
-    normalize_l2_par(&mut normed);               // in-place, parallel
+    let mut normed = embeddings.to_owned(); // one allocation
+    normalize_l2_par(&mut normed); // in-place, parallel
 
     // 2.  Pre-allocate result (Row-major layout is ndarray’s default)
     let n = normed.nrows();
@@ -285,7 +285,7 @@ pub fn similarity_matrix_par_new(embeddings: &Array2<f32>) -> anyhow::Result<Arr
             for j in (i + 1)..n {
                 // SIMD - accelerated dot product from ndarray
                 let val = row_i.dot(&normed.row(j));
-                sim_row[j] = val;                // upper half
+                sim_row[j] = val; // upper half
             }
         });
 
@@ -301,50 +301,75 @@ pub fn similarity_matrix_par_new(embeddings: &Array2<f32>) -> anyhow::Result<Arr
 
 #[cfg(feature = "accelerate")]
 use cblas::{
-    Layout, Transpose,          // enum wrappers
-    sgemm, sdot, snrm2,         // C-level calls exposed safely
+    sdot,
+    sgemm,
+    snrm2, // C-level calls exposed safely
+    Layout,
+    Transpose, // enum wrappers
 };
 
 /// Single-precision cosine similarity of two equal-length vectors.
 #[cfg(feature = "accelerate")]
-pub fn cosine_f32(a: &[f32], b: &[f32]) -> f32 {
+pub fn cosine_f32_old(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(a.len(), b.len());
     let n = a.len() as i32;
 
     // BLAS level-1 already has both primitives we need:
-    let dot  = unsafe { sdot(n, a, 1, b, 1) };
-    let na   = unsafe { snrm2(n, a, 1) };
-    let nb   = unsafe { snrm2(n, b, 1) };
+    let dot = unsafe { sdot(n, a, 1, b, 1) };
+    let na = unsafe { snrm2(n, a, 1) };
+    let nb = unsafe { snrm2(n, b, 1) };
 
     dot / (na * nb)
+}
+
+pub fn cosine_f32_opt(a: &[f32], b: &[f32], a_norm: f32, b_norm: f32) -> f32 {
+    assert_eq!(a.len(), b.len(), "dimension mismatch");
+    let mut dot = 0.0f32;
+    unsafe {
+        vDSP_dotpr(
+            a.as_ptr(),
+            1,
+            b.as_ptr(),
+            1,
+            &mut dot,
+            a.len() as vDSP_Length,
+        )
+    };
+    dot / (a_norm * b_norm)
 }
 /// # Parameters
 /// * `matrix` – flat row-major buffer of size `r × c`
 /// * `r` – number of rows (vectors)
 /// * `c` – dimensionality of each vector
-#[cfg(feature = "accelerate")]
 pub fn cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     assert_eq!(matrix.len(), r * c);
 
     // ❶ allocate the square result (row-major)
     let mut result = vec![0.0f32; r * r];
 
+    let mut norms = vec![0.0f32; r];
+    norms.iter_mut().enumerate().for_each(|(i, norm)| {
+        // -- row i norm --
+        let row_i = &matrix[i * c..(i + 1) * c];
+        *norm = norm2_f32(row_i); // compute row i norm
+    });
+
     // ❷ process each *row slice* of `result` in parallel
     //
     // `par_chunks_mut(r)` splits the buffer into disjoint mutable chunks,
     // one per row, so every thread owns a unique region and no locks are needed.
     result
-        .par_chunks_mut(r)        // &mut [f32] for one row
-        .enumerate()              // (i, row_i)
+        .chunks_mut(r) // &mut [f32] for one row
+        .enumerate() // (i, row_i)
         .for_each(|(i, row_i)| {
             // -- diagonal --
             row_i[i] = 1.0;
 
             // -- upper triangle: j > i --
-            let a = &matrix[i * c .. (i + 1) * c];
+            let a = &matrix[i * c..(i + 1) * c];
             for j in (i + 1)..r {
-                let b = &matrix[j * c .. (j + 1) * c];
-                row_i[j] = cosine_f32(a, b);      // upper-tri entry
+                let b = &matrix[j * c..(j + 1) * c];
+                row_i[j] = cosine_f32_opt(a, b, norms[i], norms[j]); // upper-tri entry
             }
         });
 
@@ -357,4 +382,113 @@ pub fn cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     }
 
     result
+}
+
+mod ffi;
+use ffi::*;
+use std::slice;
+
+#[inline]
+fn norm2_f32(x: &[f32]) -> f32 {
+    let mut ssq = 0.0_f32;
+    unsafe { vDSP_svesq(x.as_ptr(), 1, &mut ssq, x.len() as vDSP_Length) };
+    ssq.sqrt()
+}
+
+#[inline]
+fn norm2_f64(x: &[f64]) -> f64 {
+    let mut ssq = 0.0_f64;
+    unsafe { vDSP_svesqD(x.as_ptr(), 1, &mut ssq, x.len() as vDSP_Length) };
+    ssq.sqrt()
+}
+
+/// Single-precision cosine similarity of two equal-length slices.
+pub fn cosine_f32(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(a.len(), b.len(), "dimension mismatch");
+    let mut dot = 0.0f32;
+    unsafe {
+        vDSP_dotpr(
+            a.as_ptr(),
+            1,
+            b.as_ptr(),
+            1,
+            &mut dot,
+            a.len() as vDSP_Length,
+        )
+    };
+    dot / (norm2_f32(a) * norm2_f32(b))
+}
+
+/// Double-precision cosine similarity.
+pub fn cosine_f64(a: &[f64], b: &[f64]) -> f64 {
+    assert_eq!(a.len(), b.len(), "dimension mismatch");
+    let mut dot = 0.0f64;
+    unsafe {
+        vDSP_dotprD(
+            a.as_ptr(),
+            1,
+            b.as_ptr(),
+            1,
+            &mut dot,
+            a.len() as vDSP_Length,
+        )
+    };
+    dot / (norm2_f64(a) * norm2_f64(b))
+}
+
+
+
+/// Build an m × n cosine-similarity matrix between two row-major matrices
+/// stored as flat vectors (row stride = d).  The result is returned in C.
+pub fn cosine_matrix_f32(
+    a: &[f32],
+    m: usize, // A: m × d
+    b: &[f32],
+    n: usize, // B: n × d
+    d: usize, // shared dimension
+) -> Vec<f32> {
+    assert_eq!(a.len(), m * d);
+    assert_eq!(b.len(), n * d);
+
+    // 1) Dot-product matrix C = A · Bᵀ  (m × n)
+    let mut c = vec![0f32; m * n];
+    unsafe {
+        // CBLAS uses enum ints; 101 = RowMajor, 111 = NoTrans
+        cblas_sgemm(
+            101,
+            111,
+            111,
+            m as i32,
+            n as i32,
+            d as i32,
+            1.0,
+            a.as_ptr(),
+            d as i32,
+            b.as_ptr(),
+            d as i32,
+            0.0,
+            c.as_mut_ptr(),
+            n as i32,
+        );
+    }
+
+    // 2) row and column ‖·‖₂ norms
+    let mut row_norms = Vec::with_capacity(m);
+    for i in 0..m {
+        row_norms.push(norm2_f32(&a[i * d..(i + 1) * d]));
+    }
+    let mut col_norms = Vec::with_capacity(n);
+    for j in 0..n {
+        // take j-th row of Bᵀ i.e. j-th vector in B
+        let col = (0..d).map(|k| b[j + k * n]).collect::<Vec<_>>();
+        col_norms.push(norm2_f32(&col));
+    }
+
+    // 3) elementwise scale: C[i,j] /= (‖ai‖ · ‖bj‖)
+    for i in 0..m {
+        for j in 0..n {
+            c[i * n + j] /= row_norms[i] * col_norms[j];
+        }
+    }
+    c
 }
