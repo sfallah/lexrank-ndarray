@@ -1,5 +1,5 @@
 use criterion::{criterion_main, Criterion};
-use lexrank_ndarray::avx2_impl::cosine_f32_matrix;
+    use lexrank_ndarray::avx2_impl::cosine_similarity_matrix;
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
@@ -58,7 +58,7 @@ pub fn accelerate_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str
     c.bench_function(format!("accelerate_cosine_sim {}", dataset).as_str(), |b| {
         b.iter(|| {
             embeds_vec.par_iter().for_each(|(shape, vec)| {
-                let result = cosine_f32_matrix(black_box(vec), shape[0], shape[1]);
+                let result = cosine_similarity_matrix(black_box(vec), shape[0], shape[1]);
                 black_box(result);
             });
         });
