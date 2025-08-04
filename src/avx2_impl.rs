@@ -74,39 +74,25 @@ unsafe fn sumsquares_f32_avx2(p: *const f32, len: usize) -> f32 {
 // ---------- public, safe API -------------------------------------------------
 
 /// L2-norm using AVX2 if available, else scalar fallback.
+#[cfg(all(target_arch = "x86_64"))]
+#[inline(always)]
 pub fn norm2_f32(v: &[f32]) -> f32 {
-    #[cfg(all(target_arch = "x86_64"))]
     {
-        if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
-            // SAFETY: we just checked the CPU supports the instructions.
-            let ssq = unsafe { sumsquares_f32_avx2(v.as_ptr(), v.len()) };
-            return ssq.sqrt();
-        }
+        // SAFETY: we just checked the CPU supports the instructions.
+        let ssq = unsafe { sumsquares_f32_avx2(v.as_ptr(), v.len()) };
+        return ssq.sqrt();
     }
-    // portable path
-    v.iter().map(|&x| x * x).sum::<f32>().sqrt()
 }
 
 /// Cosine similarity with *pre-computed* norms.
 /// Falls back to scalar multiply-add when AVX2 unavailable.
+///
+#[inline]
+#[cfg(all(target_arch = "x86_64"))]
 pub fn cosine_f32_opt(a: &[f32], b: &[f32], a_norm: f32, b_norm: f32) -> f32 {
     assert_eq!(a.len(), b.len(), "dimension mismatch");
 
-    let dot = {
-        #[cfg(all(target_arch = "x86_64"))]
-        {
-            if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
-                // SAFETY: runtime detection above.
-                unsafe { dot_f32_avx2(a.as_ptr(), b.as_ptr(), a.len()) }
-            } else {
-                a.iter().zip(b).map(|(&x, &y)| x * y).sum()
-            }
-        }
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            a.iter().zip(b).map(|(&x, &y)| x * y).sum()
-        }
-    };
+    let dot = { unsafe { dot_f32_avx2(a.as_ptr(), b.as_ptr(), a.len()) } };
 
     dot / (a_norm * b_norm)
 }
