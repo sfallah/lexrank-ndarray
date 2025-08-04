@@ -7,6 +7,8 @@ extern crate blis_src;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
+pub mod avx2_impl;
+
 use anyhow::{anyhow, Result};
 use ndarray::{Array, Array1, Array2, Axis, Ix0};
 use std::ops::Sub;
