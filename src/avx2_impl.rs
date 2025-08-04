@@ -5,6 +5,7 @@
 //! RUSTFLAGS="-C target-feature=+avx2,+fma"         cargo build --release
 
 use std::arch::x86_64::*;
+use rayon::prelude::*;
 
 // ---------- low-level helpers ------------------------------------------------
 
@@ -117,25 +118,45 @@ pub fn cosine_f32_opt(a: &[f32], b: &[f32], a_norm: f32, b_norm: f32) -> f32 {
 /// * `c`      – dimensionality of each vector
 pub fn cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     assert_eq!(matrix.len(), r * c);
+    pub fn cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
+        assert_eq!(matrix.len(), r * c);
 
-    // pre-compute ‖row‖₂ once
-    let norms: Vec<f32> = (0..r)
-        .map(|i| norm2_f32(&matrix[i * c..(i + 1) * c]))
-        .collect();
+        // ❶ allocate the square result (row-major)
+        let mut result = vec![0.0f32; r * r];
 
-    let mut result = vec![0.0f32; r * r];
+        let mut norms = vec![0.0f32; r];
+        norms.iter_mut().enumerate().for_each(|(i, norm)| {
+            // -- row i norm --
+            let row_i = &matrix[i * c..(i + 1) * c];
+            *norm = norm2_f32(row_i); // compute row i norm
+        });
 
-    // upper triangle (including diagonal)
-    for i in 0..r {
-        result[i * r + i] = 1.0;
-        let a = &matrix[i * c..(i + 1) * c];
+        // ❷ process each *row slice* of `result` in parallel
+        //
+        // `par_chunks_mut(r)` splits the buffer into disjoint mutable chunks,
+        // one per row, so every thread owns a unique region and no locks are needed.
+        result
+            .chunks_mut(r) // &mut [f32] for one row
+            .enumerate() // (i, row_i)
+            .for_each(|(i, row_i)| {
+                // -- diagonal --
+                row_i[i] = 1.0;
 
-        for j in (i + 1)..r {
-            let b = &matrix[j * c..(j + 1) * c];
-            let sim = cosine_f32_opt(a, b, norms[i], norms[j]);
-            result[i * r + j] = sim;
-            result[j * r + i] = sim; // mirror
+                // -- upper triangle: j > i --
+                let a = &matrix[i * c..(i + 1) * c];
+                for j in (i + 1)..r {
+                    let b = &matrix[j * c..(j + 1) * c];
+                    row_i[j] = cosine_f32_opt(a, b, norms[i], norms[j]); // upper-tri entry
+                }
+            });
+
+        // ❸ mirror the upper triangle → lower triangle (cheap, serial)
+        for i in 0..r {
+            for j in (i + 1)..r {
+                let sim = result[i * r + j];
+                result[j * r + i] = sim;
+            }
         }
+
+        result
     }
-    result
-}
