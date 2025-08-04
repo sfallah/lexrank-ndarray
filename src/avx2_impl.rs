@@ -134,7 +134,7 @@ pub fn cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     // `par_chunks_mut(r)` splits the buffer into disjoint mutable chunks,
     // one per row, so every thread owns a unique region and no locks are needed.
     result
-        .chunks_mut(r) // &mut [f32] for one row
+        .par_chunks_mut(r) // &mut [f32] for one row
         .enumerate() // (i, row_i)
         .for_each(|(i, row_i)| {
             // -- diagonal --
