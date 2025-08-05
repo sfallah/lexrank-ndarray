@@ -16,7 +16,6 @@ use std::ops::Sub;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod wide_impl;
-mod avx2_impl;
 
 pub use wide_impl::{
     flatten_vec_to_wide_matrix, similarity_matrix_mm, similarity_matrix_wide,
