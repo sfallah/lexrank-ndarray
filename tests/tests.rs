@@ -9,7 +9,7 @@ pub mod tests {
     };
     use ndarray::{array, Array1, Axis, Array};
     use smallvec::smallvec;
-    use lexrank_ndarray::avx2_impl::cosine_similarity_matrix;
+    use lexrank_ndarray::avx2_impl_old::cosine_similarity_matrix;
     #[test]
     fn cblas_cosine_sim() -> anyhow::Result<()> {
         let mut embeds = Array1::range(0f32, 10., 1.).into_shape_clone((2, 5))?;

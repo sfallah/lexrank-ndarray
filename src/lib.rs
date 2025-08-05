@@ -7,7 +7,7 @@ extern crate blis_src;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
-pub mod avx2_impl;
+pub mod avx2_impl_old;
 
 use anyhow::{anyhow, Result};
 use ndarray::{Array, Array1, Array2, Axis, Ix0};
@@ -16,6 +16,7 @@ use std::ops::Sub;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod wide_impl;
+mod avx2_impl;
 
 pub use wide_impl::{
     flatten_vec_to_wide_matrix, similarity_matrix_mm, similarity_matrix_wide,
