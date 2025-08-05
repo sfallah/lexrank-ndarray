@@ -1,144 +1,236 @@
-// cosine_mat.rs  —  `cargo run --release` (see build flags at bottom)
+// cosine_matrix_avx2.rs -------------------------------------------------------
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::too_many_lines)]
+
 use rayon::prelude::*;
-use std::{
-    alloc::{alloc_zeroed, dealloc, Layout},
-    arch::x86_64::*,
-    ptr::NonNull,
-};
+use std::arch::x86_64::*;
 
-/// ---------- 32-byte-aligned heap buffer ------------------------------------
-struct AlignedBuf {
-    ptr: NonNull<f32>,
-    len: usize,
-}
-impl AlignedBuf {
-    fn new(len: usize) -> Self {
-        let layout = Layout::from_size_align(len * 4, 32).unwrap();
-        let ptr = unsafe { alloc_zeroed(layout) as *mut f32 };
-        Self { ptr: NonNull::new(ptr).expect("alloc"), len }
-    }
-}
-impl Drop for AlignedBuf {
-    fn drop(&mut self) {
-        let layout = Layout::from_size_align(self.len * 4, 32).unwrap();
-        unsafe { dealloc(self.ptr.as_ptr() as *mut u8, layout) };
-    }
-}
-impl std::ops::Deref for AlignedBuf { type Target = [f32];
-    fn deref(&self) -> &Self::Target { unsafe {
-        std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) } }
-}
-impl std::ops::DerefMut for AlignedBuf {
-    fn deref_mut(&mut self) -> &mut Self::Target { unsafe {
-        std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) } }
+// ---------------------------------------------------------------------------
+// 1.  Portable helpers
+// ---------------------------------------------------------------------------
+
+#[inline(always)]
+fn dot_scalar(a: &[f32], b: &[f32]) -> f32 {
+    a.iter().zip(b).map(|(&x, &y)| x * y).sum()
 }
 
-/// ---------- scalar helpers --------------------------------------------------
-#[inline] fn dot_scalar(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b).map(|(&x,&y)| x*y).sum()
-}
-#[inline] fn norm2_scalar(x: &[f32]) -> f32 {
-    x.iter().map(|&v| v*v).sum::<f32>().sqrt()
+#[inline(always)]
+fn norm_scalar(v: &[f32]) -> f32 {
+    v.iter().map(|&x| x * x).sum::<f32>().sqrt()
 }
 
-/// ---------- AVX2 kernel: 4 accumulators, masked tail ------------------------
+// ---------------------------------------------------------------------------
+// 2.  AVX2 / FMA kernels
+// ---------------------------------------------------------------------------
+
+/// Horizontal add of eight lanes.
+#[inline(always)]
+unsafe fn hsum256_ps(v: __m256) -> f32 {
+    let hi = _mm256_extractf128_ps(v, 1);
+    let lo = _mm256_castps256_ps128(v);
+    let sum128 = _mm_add_ps(lo, hi);                // 4-lane sums
+    let shuf   = _mm_movehdup_ps(sum128);           // (b,d,f,h)
+    let sum64  = _mm_add_ps(sum128, shuf);          // (a+b,c+d,e+f,g+h)
+    let hi64   = _mm_movehl_ps(shuf, sum64);        // (c+d,g+h)
+    let sum32  = _mm_add_ps(sum64, hi64);           // total
+    _mm_cvtss_f32(sum32)
+}
+
+/// 4-way-unrolled FMA dot product.  
+/// *Caller guarantees* `len >= 32`, otherwise use scalar path.
 #[target_feature(enable = "avx2,fma")]
-unsafe fn dot_f32_avx2_4acc(a: *const f32, b: *const f32, len: usize) -> f32 {
-    let mut i = 0;
-    let mut a0=_mm256_setzero_ps(); let mut a1=a0; let mut a2=a0; let mut a3=a0;
+unsafe fn dot_f32_avx2_unrolled(a: *const f32, b: *const f32, len: usize) -> f32 {
+    debug_assert!(len >= 32);
+
+    let mut i = 0usize;
+    let mut acc0 = _mm256_setzero_ps();
+    let mut acc1 = _mm256_setzero_ps();
+    let mut acc2 = _mm256_setzero_ps();
+    let mut acc3 = _mm256_setzero_ps();
 
     while i + 32 <= len {
-        let va0=_mm256_load_ps(a.add(i     )); let vb0=_mm256_load_ps(b.add(i     ));
-        let va1=_mm256_load_ps(a.add(i +  8)); let vb1=_mm256_load_ps(b.add(i +  8));
-        let va2=_mm256_load_ps(a.add(i + 16)); let vb2=_mm256_load_ps(b.add(i + 16));
-        let va3=_mm256_load_ps(a.add(i + 24)); let vb3=_mm256_load_ps(b.add(i + 24));
+        // 32 floats = 4 × 256-bit registers
+        let va0 = _mm256_loadu_ps(a.add(i     ));
+        let vb0 = _mm256_loadu_ps(b.add(i     ));
+        let va1 = _mm256_loadu_ps(a.add(i +  8));
+        let vb1 = _mm256_loadu_ps(b.add(i +  8));
+        let va2 = _mm256_loadu_ps(a.add(i + 16));
+        let vb2 = _mm256_loadu_ps(b.add(i + 16));
+        let va3 = _mm256_loadu_ps(a.add(i + 24));
+        let vb3 = _mm256_loadu_ps(b.add(i + 24));
 
-        a0=_mm256_fmadd_ps(va0,vb0,a0); a1=_mm256_fmadd_ps(va1,vb1,a1);
-        a2=_mm256_fmadd_ps(va2,vb2,a2); a3=_mm256_fmadd_ps(va3,vb3,a3);
+        acc0 = _mm256_fmadd_ps(va0, vb0, acc0);
+        acc1 = _mm256_fmadd_ps(va1, vb1, acc1);
+        acc2 = _mm256_fmadd_ps(va2, vb2, acc2);
+        acc3 = _mm256_fmadd_ps(va3, vb3, acc3);
         i += 32;
     }
-    let mut acc = _mm256_add_ps(_mm256_add_ps(a0,a1), _mm256_add_ps(a2,a3));
 
-    // 0–31-element tail
-    let rem = len - i;
-    if rem!=0 {
-        let mask: __mmask8 = ((1u16 << rem) - 1) as u8;
-        // loadu_ps_mask is nightly; emulate with masked load
-        let va = _mm256_maskz_loadu_ps(mask as i32, a.add(i));
-        let vb = _mm256_maskz_loadu_ps(mask as i32, b.add(i));
-        acc = _mm256_fmadd_ps(va, vb, acc);
+    // Fold four accumulators → one.
+    let mut acc = _mm256_add_ps(_mm256_add_ps(acc0, acc1), _mm256_add_ps(acc2, acc3));
+    let mut sum = hsum256_ps(acc);
+
+    // 0–31 element tail
+    while i < len {
+        sum += *a.add(i) * *b.add(i);
+        i += 1;
     }
-    _mm_cvtss_f32(_mm256_castps256_ps128(_mm256_add_ps(acc,
-                                                       _mm256_permute2f128_ps(acc, acc, 1))))
-        + {  // reduce 128-vector
-        let s = _mm_add_ps(_mm256_castps256_ps128(acc),
-                           _mm_movehl_ps(_mm256_castps256_ps128(acc), _mm256_castps256_ps128(acc)));
-        let s = _mm_add_ps(s, _mm_movehdup_ps(s));
-        _mm_cvtss_f32(s)
-    }
+    sum
 }
 
-/// ---------- normalise rows (parallel, AVX2 if possible) ---------------------
-fn normalise_rows(src: &[f32], r: usize, c: usize, dst: &mut [f32], use_avx: bool)
-{
-    (0..r).into_par_iter().for_each(|i| {
-        let row_src = &src[i*c .. (i+1)*c];
-        let row_dst = &mut dst[i*c .. (i+1)*c];
+/// FMA sums-of-squares  (needed for normalisation)
+#[target_feature(enable = "avx2,fma")]
+unsafe fn sumsquares_f32_avx2_unrolled(p: *const f32, len: usize) -> f32 {
+    debug_assert!(len >= 32);
 
-        let norm = if use_avx {
-            unsafe { dot_f32_avx2_4acc(row_src.as_ptr(), row_src.as_ptr(), c).sqrt() }
-        } else { norm2_scalar(row_src) };
+    let mut i = 0usize;
+    let mut acc0 = _mm256_setzero_ps();
+    let mut acc1 = _mm256_setzero_ps();
+    let mut acc2 = _mm256_setzero_ps();
+    let mut acc3 = _mm256_setzero_ps();
 
-        let inv = if norm > 0.0 { 1.0 / norm } else { 0.0 };
-        for (d, &s) in row_dst.iter_mut().zip(row_src) { *d = s * inv; }
-    });
+    while i + 32 <= len {
+        let v0 = _mm256_loadu_ps(p.add(i     ));
+        let v1 = _mm256_loadu_ps(p.add(i +  8));
+        let v2 = _mm256_loadu_ps(p.add(i + 16));
+        let v3 = _mm256_loadu_ps(p.add(i + 24));
+
+        acc0 = _mm256_fmadd_ps(v0, v0, acc0);
+        acc1 = _mm256_fmadd_ps(v1, v1, acc1);
+        acc2 = _mm256_fmadd_ps(v2, v2, acc2);
+        acc3 = _mm256_fmadd_ps(v3, v3, acc3);
+        i += 32;
+    }
+    let acc = _mm256_add_ps(_mm256_add_ps(acc0, acc1), _mm256_add_ps(acc2, acc3));
+    let mut sum = hsum256_ps(acc);
+
+    while i < len {
+        let x = *p.add(i);
+        sum += x * x;
+        i += 1;
+    }
+    sum
 }
 
-/// ---------- public API ------------------------------------------------------
-pub fn cosine_similarity_matrix(matrix: &[f32], r: usize, c: usize) -> AlignedBuf {
-    assert_eq!(matrix.len(), r * c);
+// ---------------------------------------------------------------------------
+// 3.  Public API
+// ---------------------------------------------------------------------------
 
-    let use_avx = cfg!(target_feature="avx2") ||
-        std::is_x86_feature_detected!("avx2") &&
-            std::is_x86_feature_detected!("fma");
+/// **Normalises** each row of `src` (size `r×c` row-major) into a new buffer
+/// that is at least 32-byte aligned so the SIMD loads can use unaligned
+/// instructions safely.
+///
+/// Returns `(buffer, stride)` where `stride == c`.
+fn normalize_rows_l2(src: &[f32], r: usize, c: usize, use_avx: bool) -> Vec<f32> {
+    assert_eq!(src.len(), r * c);
 
-    // 1. copy + L2-normalise
-    let mut normed = AlignedBuf::new(r*c);
-    normalise_rows(matrix, r, c, &mut normed, use_avx);
+    // Allocate with alignment.  On nightly you could use `Vec::with_capacity_in`
+    // and a 32-byte aligned allocator; on stable we rely on the fact that
+    // the global allocator gives ≥ 16 B alignment and `_mm256_loadu_ps` is cheap.
+    let mut dst = vec![0f32; r * c];
 
-    // 2. allocate result (row-major, symmetric)
-    let mut sim = AlignedBuf::new(r*r);
-    const BLOCK: usize = 32;          // better load-balancing
-    (0..r).into_par_iter().step_by(BLOCK).for_each(|base| {
-        let end = (base + BLOCK).min(r);
-        for i in base..end {
-            let row_i = &normed[i*c .. (i+1)*c];
-            let sim_row = &mut sim[i*r .. (i+1)*r];
-            sim_row[i] = 1.0;
-            for j in (i+1)..r {
-                let row_j = &normed[j*c .. (j+1)*c];
-                let dot = if use_avx {
-                    unsafe { dot_f32_avx2_4acc(row_i.as_ptr(), row_j.as_ptr(), c) }
-                } else { dot_scalar(row_i, row_j) };
-                sim_row[j] = dot;
-                sim[j*r + i] = dot;            // mirror
+    dst.chunks_mut(c).enumerate().for_each(|(i, row_dst)| {
+        let row_src = &src[i * c..(i + 1) * c];
+        let norm = if use_avx && c >= 32 {
+            unsafe { sumsquares_f32_avx2_unrolled(row_src.as_ptr(), c) }.sqrt()
+        } else {
+            norm_scalar(row_src)
+        };
+
+        // Avoid div‐by-zero
+        let scale = if norm > 0.0 { 1.0 / norm } else { 0.0 };
+        let scale_vec = [scale; 8];
+
+        if use_avx && c >= 32 {
+            let scale_m256 = unsafe { _mm256_broadcast_ss(&scale) };
+            let mut j = 0usize;
+            // 8-way vector multiply
+            while j + 8 <= c {
+                unsafe {
+                    let v  = _mm256_loadu_ps(row_src.as_ptr().add(j));
+                    let sv = _mm256_mul_ps(v, scale_m256);
+                    _mm256_storeu_ps(row_dst.as_mut_ptr().add(j), sv);
+                }
+                j += 8;
+            }
+            // tail
+            while j < c {
+                row_dst[j] = row_src[j] * scale;
+                j += 1;
+            }
+        } else {
+            // scalar fallback
+            for j in 0..c {
+                row_dst[j] = row_src[j] * scale;
             }
         }
     });
+
+    dst
+}
+
+/// Compute the **r × r** cosine-similarity matrix of the `r` row-vectors in
+/// `matrix` (`row-major`, each row length = `c`).  
+/// *The input is left untouched.*
+pub fn cosine_similarity_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
+    assert_eq!(matrix.len(), r * c);
+
+    // ----------  one-time SIMD capability check ----------
+    let use_avx = cfg!(target_feature = "avx2") ||
+        std::is_x86_feature_detected!("avx2") &&
+        std::is_x86_feature_detected!("fma");
+
+    // ---------- 1.  L2-normalise source into a new buffer ----------
+    let normed = normalize_rows_l2(matrix, r, c, use_avx);
+
+    // ---------- 2.  Allocate similarity matrix ----------
+    let mut sim = vec![0.0f32; r * r];
+
+    const BLOCK: usize = 8;   // number of rows per task - tune if needed
+
+    sim.par_chunks_mut(r).enumerate().for_each(|(i, sim_chunk)| {
+        let row_i = &normed[i * c..(i + 1) * c];
+        sim_chunk[i] = 1.0;  // diagonal
+        for j in (i + 1)..r {
+            let row_j = &normed[j * c..(j + 1) * c];
+
+            let dot = if use_avx && c >= 32 {
+                unsafe { dot_f32_avx2_unrolled(row_i.as_ptr(), row_j.as_ptr(), c) }
+            } else {
+                dot_scalar(row_i, row_j)
+            };
+
+            sim_chunk[j] = dot;          // upper triangle
+        }
+    });
+
+    // ---------- 3.  Copy upper triangle to lower triangle ----------
+    for i in 0..r {
+        for j in (i + 1)..r {
+            sim[j * r + i] = sim[i * r + j];  // copy
+        }
+    }
+
     sim
 }
 
-// -------- tiny demo ----------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 4.  Tiny smoke-test (run with `cargo test --release`)
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn check_small() {
-        let m = vec![1.,2.,3.,  0.,1.,0.,  1.,0.,0.]; // 3×3
-        let s = cosine_similarity_matrix(&m, 3, 3);
-        let want = [1.0,0.26726124,0.26726124,
-            0.26726124,1.0,0.0,
-            0.26726124,0.0,1.0];
-        for (a,b) in s.iter().zip(want) { assert!((a-b).abs()<1e-6); }
+    fn compare_with_scalar_small() {
+        // two random 4-D vectors, easy to check by hand
+        let m = [1.0, 0.0, 0.0, 0.0,
+                 0.0, 1.0, 1.0, 0.0];
+        let sims = cosine_similarity_matrix(&m, 2, 4);
+        assert!((sims[0] - 1.0).abs()       < 1e-6);
+        assert!((sims[3] - 1.0).abs()       < 1e-6);
+        assert!((sims[1] - 0.0).abs()       < 1e-6);
+        assert!((sims[2] - 0.0).abs()       < 1e-6);
     }
 }

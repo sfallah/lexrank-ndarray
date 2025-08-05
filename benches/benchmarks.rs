@@ -1,5 +1,5 @@
 use criterion::{criterion_main, Criterion};
-    use lexrank_ndarray::avx2_impl_old::cosine_similarity_matrix;
+    use lexrank_ndarray::avx2_impl::cosine_similarity_matrix;
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
