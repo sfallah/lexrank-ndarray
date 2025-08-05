@@ -5,6 +5,8 @@
 use rayon::prelude::*;
 use std::arch::x86_64::*;
 
+const BLOCK: usize = 8; // number of rows per task - tune if needed
+
 // ---------------------------------------------------------------------------
 // 1.  Portable helpers
 // ---------------------------------------------------------------------------
@@ -28,11 +30,11 @@ fn norm_scalar(v: &[f32]) -> f32 {
 unsafe fn hsum256_ps(v: __m256) -> f32 {
     let hi = _mm256_extractf128_ps(v, 1);
     let lo = _mm256_castps256_ps128(v);
-    let sum128 = _mm_add_ps(lo, hi);                // 4-lane sums
-    let shuf   = _mm_movehdup_ps(sum128);           // (b,d,f,h)
-    let sum64  = _mm_add_ps(sum128, shuf);          // (a+b,c+d,e+f,g+h)
-    let hi64   = _mm_movehl_ps(shuf, sum64);        // (c+d,g+h)
-    let sum32  = _mm_add_ps(sum64, hi64);           // total
+    let sum128 = _mm_add_ps(lo, hi); // 4-lane sums
+    let shuf = _mm_movehdup_ps(sum128); // (b,d,f,h)
+    let sum64 = _mm_add_ps(sum128, shuf); // (a+b,c+d,e+f,g+h)
+    let hi64 = _mm_movehl_ps(shuf, sum64); // (c+d,g+h)
+    let sum32 = _mm_add_ps(sum64, hi64); // total
     _mm_cvtss_f32(sum32)
 }
 
@@ -50,10 +52,10 @@ unsafe fn dot_f32_avx2_unrolled(a: *const f32, b: *const f32, len: usize) -> f32
 
     while i + 32 <= len {
         // 32 floats = 4 × 256-bit registers
-        let va0 = _mm256_loadu_ps(a.add(i     ));
-        let vb0 = _mm256_loadu_ps(b.add(i     ));
-        let va1 = _mm256_loadu_ps(a.add(i +  8));
-        let vb1 = _mm256_loadu_ps(b.add(i +  8));
+        let va0 = _mm256_loadu_ps(a.add(i));
+        let vb0 = _mm256_loadu_ps(b.add(i));
+        let va1 = _mm256_loadu_ps(a.add(i + 8));
+        let vb1 = _mm256_loadu_ps(b.add(i + 8));
         let va2 = _mm256_loadu_ps(a.add(i + 16));
         let vb2 = _mm256_loadu_ps(b.add(i + 16));
         let va3 = _mm256_loadu_ps(a.add(i + 24));
@@ -90,8 +92,8 @@ unsafe fn sumsquares_f32_avx2_unrolled(p: *const f32, len: usize) -> f32 {
     let mut acc3 = _mm256_setzero_ps();
 
     while i + 32 <= len {
-        let v0 = _mm256_loadu_ps(p.add(i     ));
-        let v1 = _mm256_loadu_ps(p.add(i +  8));
+        let v0 = _mm256_loadu_ps(p.add(i));
+        let v1 = _mm256_loadu_ps(p.add(i + 8));
         let v2 = _mm256_loadu_ps(p.add(i + 16));
         let v3 = _mm256_loadu_ps(p.add(i + 24));
 
@@ -129,42 +131,55 @@ fn normalize_rows_l2(src: &[f32], r: usize, c: usize, use_avx: bool) -> Vec<f32>
     // the global allocator gives ≥ 16 B alignment and `_mm256_loadu_ps` is cheap.
     let mut dst = vec![0f32; r * c];
 
-    dst.chunks_mut(c).enumerate().for_each(|(i, row_dst)| {
-        let row_src = &src[i * c..(i + 1) * c];
-        let norm = if use_avx && c >= 32 {
-            unsafe { sumsquares_f32_avx2_unrolled(row_src.as_ptr(), c) }.sqrt()
-        } else {
-            norm_scalar(row_src)
-        };
+    dst.par_chunks_mut(BLOCK * c)
+        .enumerate()
+        .for_each(|(i, chunk)| {
+            let start = i * BLOCK * c;
+            let end = start + chunk.len();
+            let row_count = (end - start) / c;
 
-        // Avoid div‐by-zero
-        let scale = if norm > 0.0 { 1.0 / norm } else { 0.0 };
-        let scale_vec = [scale; 8];
+            for j in 0..row_count {
+                let row_start = start + j * c;
+                let row_end = row_start + c;
+                let row_src = &src[row_start..row_end];
+                let row_dst = &mut chunk[j * c..(j + 1) * c];
 
-        if use_avx && c >= 32 {
-            let scale_m256 = unsafe { _mm256_broadcast_ss(&scale) };
-            let mut j = 0usize;
-            // 8-way vector multiply
-            while j + 8 <= c {
-                unsafe {
-                    let v  = _mm256_loadu_ps(row_src.as_ptr().add(j));
-                    let sv = _mm256_mul_ps(v, scale_m256);
-                    _mm256_storeu_ps(row_dst.as_mut_ptr().add(j), sv);
+                // Compute L2 norm
+                let norm = if use_avx && c >= 32 {
+                    unsafe { sumsquares_f32_avx2_unrolled(row_src.as_ptr(), c) }.sqrt()
+                } else {
+                    norm_scalar(row_src)
+                };
+
+                // Avoid div‐by-zero
+                let scale = if norm > 0.0 { 1.0 / norm } else { 0.0 };
+                let scale_vec = [scale; 8];
+
+                if use_avx && c >= 32 {
+                    let scale_m256 = unsafe { _mm256_broadcast_ss(&scale) };
+                    let mut k = 0usize;
+                    // 8-way vector multiply
+                    while k + 8 <= c {
+                        unsafe {
+                            let v = _mm256_loadu_ps(row_src.as_ptr().add(k));
+                            let sv = _mm256_mul_ps(v, scale_m256);
+                            _mm256_storeu_ps(row_dst.as_mut_ptr().add(k), sv);
+                        }
+                        k += 8;
+                    }
+                    // tail
+                    while k < c {
+                        row_dst[k] = row_src[k] * scale;
+                        k += 1;
+                    }
+                } else {
+                    // scalar fallback
+                    for k in 0..c {
+                        row_dst[k] = row_src[k] * scale;
+                    }
                 }
-                j += 8;
             }
-            // tail
-            while j < c {
-                row_dst[j] = row_src[j] * scale;
-                j += 1;
-            }
-        } else {
-            // scalar fallback
-            for j in 0..c {
-                row_dst[j] = row_src[j] * scale;
-            }
-        }
-    });
+        });
 
     dst
 }
@@ -176,9 +191,8 @@ pub fn cosine_similarity_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> 
     assert_eq!(matrix.len(), r * c);
 
     // ----------  one-time SIMD capability check ----------
-    let use_avx = cfg!(target_feature = "avx2") ||
-        std::is_x86_feature_detected!("avx2") &&
-        std::is_x86_feature_detected!("fma");
+    let use_avx = cfg!(target_feature = "avx2")
+        || std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma");
 
     // ---------- 1.  L2-normalise source into a new buffer ----------
     let normed = normalize_rows_l2(matrix, r, c, use_avx);
@@ -186,28 +200,32 @@ pub fn cosine_similarity_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> 
     // ---------- 2.  Allocate similarity matrix ----------
     let mut sim = vec![0.0f32; r * r];
 
-    const BLOCK: usize = 8;   // number of rows per task - tune if needed
+    sim.par_chunks_mut(BLOCK).enumerate().for_each(|(k, sim_chunk)| {
+        let start = k * BLOCK;
+        
+        for i in 0..(sim_chunk.len() - 1) / r {
+            println!("Processing chunk {} row {}, start {}", k, i, start);
+            let row_i = &normed[(start + i) * c..(start + i + 1) * c];
+            for j in (i + 1)..r {
+                let row_j = &normed[(start + j) * c..(start + j + 1) * c];
 
-    sim.par_chunks_mut(r).enumerate().for_each(|(i, sim_chunk)| {
-        let row_i = &normed[i * c..(i + 1) * c];
-        sim_chunk[i] = 1.0;  // diagonal
-        for j in (i + 1)..r {
-            let row_j = &normed[j * c..(j + 1) * c];
+                // Compute dot product
+                let dot = if use_avx && c >= 32 {
+                    unsafe { dot_f32_avx2_unrolled(row_i.as_ptr(), row_j.as_ptr(), c) }
+                } else {
+                    dot_scalar(row_i, row_j)
+                };
 
-            let dot = if use_avx && c >= 32 {
-                unsafe { dot_f32_avx2_unrolled(row_i.as_ptr(), row_j.as_ptr(), c) }
-            } else {
-                dot_scalar(row_i, row_j)
-            };
-
-            sim_chunk[j] = dot;          // upper triangle
+                sim_chunk[i * r + j] = dot; // upper triangle
+            }
         }
     });
 
     // ---------- 3.  Copy upper triangle to lower triangle ----------
     for i in 0..r {
+        sim[i * r + i] = 1.0; // diagonal
         for j in (i + 1)..r {
-            sim[j * r + i] = sim[i * r + j];  // copy
+            sim[j * r + i] = sim[i * r + j]; // copy
         }
     }
 
@@ -225,12 +243,11 @@ mod tests {
     #[test]
     fn compare_with_scalar_small() {
         // two random 4-D vectors, easy to check by hand
-        let m = [1.0, 0.0, 0.0, 0.0,
-                 0.0, 1.0, 1.0, 0.0];
+        let m = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0];
         let sims = cosine_similarity_matrix(&m, 2, 4);
-        assert!((sims[0] - 1.0).abs()       < 1e-6);
-        assert!((sims[3] - 1.0).abs()       < 1e-6);
-        assert!((sims[1] - 0.0).abs()       < 1e-6);
-        assert!((sims[2] - 0.0).abs()       < 1e-6);
+        assert!((sims[0] - 1.0).abs() < 1e-6);
+        assert!((sims[3] - 1.0).abs() < 1e-6);
+        assert!((sims[1] - 0.0).abs() < 1e-6);
+        assert!((sims[2] - 0.0).abs() < 1e-6);
     }
 }
