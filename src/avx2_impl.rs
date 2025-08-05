@@ -200,30 +200,31 @@ pub fn cosine_similarity_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> 
     // ---------- 2.  Allocate similarity matrix ----------
     let mut sim = vec![0.0f32; r * r];
 
-    sim.par_chunks_mut(BLOCK).enumerate().for_each(|(k, sim_chunk)| {
-        let start = k * BLOCK;
-        
-        for i in 0..(sim_chunk.len() - 1) / r {
-            println!("Processing chunk {} row {}, start {}", k, i, start);
-            let row_i = &normed[(start + i) * c..(start + i + 1) * c];
-            for j in (i + 1)..r {
-                let row_j = &normed[(start + j) * c..(start + j + 1) * c];
-
-                // Compute dot product
-                let dot = if use_avx && c >= 32 {
-                    unsafe { dot_f32_avx2_unrolled(row_i.as_ptr(), row_j.as_ptr(), c) }
-                } else {
-                    dot_scalar(row_i, row_j)
-                };
-
-                sim_chunk[i * r + j] = dot; // upper triangle
-            }
-        }
-    });
+    sim.par_chunks_mut(r)
+        .enumerate()
+        .for_each(|(i, sim_chunk)| {
+            let row_i = &normed[i * c..(i + 1) * c];
+            sim_chunk[i] = 1.0;
+            sim_chunk[(i + 1)..r]
+                .par_chunks_mut(BLOCK)
+                .enumerate()
+                .for_each(|(k, sim_sub_chunck)| {
+                    for j in 0..sim_sub_chunck.len() {
+                        let j_idx = k * BLOCK + j; // global index
+                        // Compute cosine similarity for row_i and row_j
+                        let row_j = &normed[(i + j_idx + 1) * c..(i + j_idx + 2) * c];
+                        let dot = if use_avx && c >= 32 {
+                            unsafe { dot_f32_avx2_unrolled(row_i.as_ptr(), row_j.as_ptr(), c) }
+                        } else {
+                            dot_scalar(row_i, row_j)
+                        };
+                        sim_sub_chunck[j] = dot; // upper triangle
+                    }
+                }); // diagonal
+        });
 
     // ---------- 3.  Copy upper triangle to lower triangle ----------
     for i in 0..r {
-        sim[i * r + i] = 1.0; // diagonal
         for j in (i + 1)..r {
             sim[j * r + i] = sim[i * r + j]; // copy
         }
