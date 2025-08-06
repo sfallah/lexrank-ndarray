@@ -13,26 +13,12 @@ extern crate intel_mkl_src;
 use anyhow::Result;
 use std::ops::{MulAssign, Sub};
 
-
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
 }
 
-use rayon::prelude::*;
-
-#[inline]
-pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
-    let norm = embeddings
-        .pow2()
-        .sum_axis(Axis(1))
-        .sqrt()
-        .mapv(|x| if x > 0.0 { x } else { 1f32 })
-        .recip();
-    let normed = embeddings * norm.insert_axis(Axis(1));
-    Ok(normed)
-}
-
-pub fn normalize_l2_par(normed: &mut Array2<f32>) {
+#[inline(always)]
+pub fn normalize_l2(normed: &mut Array2<f32>) {
     normed
         .axis_iter_mut(Axis(0))
         .into_iter()
@@ -45,19 +31,10 @@ pub fn normalize_l2_par(normed: &mut Array2<f32>) {
         });
 }
 
-#[inline]
-pub fn similarity_matrix_par(embeddings: &mut Array2<f32>) {
-    // Normalize in-place
-    normalize_l2_par(embeddings);
-
-    // Compute cosine similarity as dot product of normalized vectors
-    embeddings.dot(&embeddings.t());
-}
-
-pub fn similarity_matrix(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
-    let normed = normalize_l2(embeddings)?;
-    let sim_matrix = normed.dot(&normed.t());
-    Ok(sim_matrix)
+#[inline(always)]
+pub fn similarity_matrix(embeddings: &mut Array2<f32>) -> Array2<f32> {
+    normalize_l2(embeddings);
+    embeddings.dot(&embeddings.t())
 }
 
 pub fn cos_similarity(embedding1: &Vec<f32>, embedding2: &Vec<f32>) -> anyhow::Result<f32> {
@@ -196,9 +173,9 @@ pub fn lexrank(
         return Ok(vec![]);
     }
     let embeddings_flatten: Vec<f32> = embeddings.iter().flatten().cloned().collect();
-    let embeddings_array: Array2<f32> = Array::from(embeddings_flatten)
+    let mut embeddings_array: Array2<f32> = Array::from(embeddings_flatten)
         .into_shape_clone((embeddings.len(), embeddings[0].len()))?;
-    lexrank_ts(&embeddings_array, threshold, max_iter)
+    lexrank_ts(&mut embeddings_array, threshold, max_iter)
 }
 
 pub fn lexrank_array(
@@ -211,21 +188,20 @@ pub fn lexrank_array(
     if embeddings.is_empty() {
         return Ok(vec![]);
     }
-    let embeddings_array: Array2<f32> =
+    let mut embeddings_array: Array2<f32> =
         Array::from(embeddings.to_vec()).into_shape_clone((no_seq, embed_dim))?;
-    lexrank_ts(&embeddings_array, threshold, max_iter)
+    lexrank_ts(&mut embeddings_array, threshold, max_iter)
 }
 
-
 pub fn lexrank_ts(
-    embeddings_array: &Array2<f32>,
+    embeddings_array: &mut Array2<f32>,
     threshold: Option<f32>,
     max_iter: usize,
 ) -> anyhow::Result<Vec<(usize, f32)>> {
     if embeddings_array.shape()[0] == 0 {
         return Ok(vec![]);
     }
-    let sim_matrix = similarity_matrix(&embeddings_array)?;
+    let sim_matrix = similarity_matrix(embeddings_array);
     let threshold = threshold.map(|threshold| {
         let sim_min: f32 = sim_matrix.flatten().into_iter().reduce(f32::min).unwrap();
         //println!("sim_min: {:8.16}", sim_min);
@@ -239,50 +215,5 @@ pub fn lexrank_ts(
         .collect();
     ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     Ok(ranked_sentences)
-}
-
-/// Cosine-similarity matrix (row⋅row) with upper-triangle parallel fill.
-///
-/// * `embeddings.shape()` == (n, d)
-/// * Requires `ndarray = { version = "0.15", features = ["rayon"] }`
-#[inline]
-pub fn similarity_matrix_par_new(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
-    // 1.  Normalise rows in a single owned buffer
-    let mut normed = embeddings.to_owned(); // one allocation
-    normalize_l2_par(&mut normed); // in-place, parallel
-
-    // 2.  Pre-allocate result (Row-major layout is ndarray’s default)
-    let n = normed.nrows();
-    let mut sim = Array2::<f32>::zeros((n, n));
-
-    // 3.  Parallel fill: diagonal + upper triangle
-    //
-    //     `axis_iter_mut(Axis(0)).into_par_iter()` gives each Rayon
-    //     worker a unique mutable row slice →   ✓ no aliasing
-    //     We only write (i,i) and (i, j > i) inside that slice.
-    //
-    sim.axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .enumerate()
-        .for_each(|(i, mut sim_row)| {
-            // Self-similarity
-            sim_row[i] = 1.0;
-
-            let row_i = normed.row(i);
-            for j in (i + 1)..n {
-                // SIMD - accelerated dot product from ndarray
-                let val = row_i.dot(&normed.row(j));
-                sim_row[j] = val; // upper half
-            }
-        });
-
-    // 4.  Mirror upper → lower half (single thread, cache-friendly)
-    for i in 0..n {
-        for j in (i + 1)..n {
-            sim[(j, i)] = sim[(i, j)];
-        }
-    }
-
-    Ok(sim)
 }
 

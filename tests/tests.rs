@@ -11,7 +11,7 @@ pub mod tests {
         let mean = 100.0;
         let std_dev = 15.0;
         let mut embeddings = get_rand_arr2_f32(m, n, mean, std_dev)?;
-        let sim_matrix = similarity_matrix(&mut embeddings)?;
+        let sim_matrix = similarity_matrix(&mut embeddings);
         assert_eq!(sim_matrix.shape(), [m, m]);
         println!("{:8.16}", sim_matrix);
         Ok(())
@@ -20,11 +20,14 @@ pub mod tests {
     #[test]
     fn ndarray_cosine_sim() -> anyhow::Result<()> {
         let mut embeds = Array1::range(0f32, 10., 1.).into_shape_clone((2, 5))?;
-        let embeds_normed = normalize_l2(&mut embeds)?;
+        let mut embeds_normed = embeds.clone();
+        normalize_l2(&mut embeds_normed);
         assert_eq!(embeds_normed.shape(), [2, 5]);
         println!("{:8.16}", embeds_normed);
 
-        let sim_matrix = similarity_matrix(&mut embeds)?;
+        let mut embeds = embeds.to_owned();
+        let sim_matrix = similarity_matrix(&mut embeds);
+        println!("{:8.16}", sim_matrix);
         assert_eq!(sim_matrix.shape(), [2, 2]);
         println!("{:8.16}", sim_matrix);
         Ok(())
@@ -65,7 +68,7 @@ pub mod tests {
         let embed2_array = embed2_array.into_shape_with_order((1, 384))?;
 
         embed1_array.append(Axis(0), embed2_array.view())?;
-        let sim_matrix = similarity_matrix(&embed1_array)?;
+        let sim_matrix = similarity_matrix(&mut embed1_array);
         let pair_sim_mx = sim_matrix.get((0, 1)).unwrap();
         println!("MX  sim: {:8.16}", pair_sim_mx);
         assert!(f32_close(pair_sim, *pair_sim_mx, 1e-6));
@@ -102,8 +105,8 @@ pub mod tests {
             );
             println!("{:?}", split_data.no_tokens);
             println!("{:?}", split_data.sentence_embeddings_file);
-            let tensor = load_split_tensor(&test_data_path, &split_data)?;
-            let lx_rank = lexrank_ts(&tensor, None, 10000)?;
+            let mut tensors = load_split_tensor(&test_data_path, &split_data)?;
+            let lx_rank = lexrank_ts(&mut tensors, None, 10000)?;
             let lx_rank_str = lx_rank
                 .iter()
                 .map(|(idx, score)| format!("{:?}: {:.16}", idx, score))
@@ -126,9 +129,9 @@ pub mod tests {
 
     #[test]
     fn normalize_l2_test() -> anyhow::Result<()> {
-        let a = array![[1.0f32, 2., 3.], [4., 5., 6.],];
-        let normed = normalize_l2(&a)?;
-        println!("{:8.12}", normed);
+        let mut a = array![[1.0f32, 2., 3.], [4., 5., 6.],];
+        normalize_l2(&mut a);
+        println!("{:8.12}", a);
         Ok(())
     }
 }
