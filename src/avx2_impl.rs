@@ -5,7 +5,7 @@
 use rayon::prelude::*;
 use std::arch::x86_64::*;
 
-const BLOCK: usize = 16; // number of rows per task - tune if needed
+const BLOCK: usize = 8; // number of rows per task - tune if needed
 
 // ---------------------------------------------------------------------------
 // 1.  Portable helpers
