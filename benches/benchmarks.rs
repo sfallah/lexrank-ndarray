@@ -102,12 +102,15 @@ pub fn benches() {
         .configure_from_args();
 
     let data_set_map = [
+        //(
+        //    "MiniLM-L6-v2",
+        //    "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2/",
+        //),
         (
-            "MiniLM-L6-v2",
-            "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2/",
-        ),
-        //("bge-m3", "tests/test_data/superlinear_embeddings/bge-m3/"),
-        //("multilingual-e5-large-instruct", "tests/test_data/superlinear_embeddings/multilingual-e5-large-instruct/"),
+            "gte-Qwen2-1.5B-instruct",
+            "tests/test_data/superlinear_embeddings/gte-Qwen2-1.5B-instruct/",
+        ), //("bge-m3", "tests/test_data/superlinear_embeddings/bge-m3/"),
+           //("multilingual-e5-large-instruct", "tests/test_data/superlinear_embeddings/multilingual-e5-large-instruct/"),
     ];
     for (dataset, tensor_file) in data_set_map.iter() {
         //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
