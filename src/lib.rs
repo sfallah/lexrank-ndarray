@@ -209,7 +209,7 @@ pub fn lexrank_array(
     let mut ranked_sentences: Vec<_> = (0..no_seq as usize)
         .zip(scores_vec)
         .collect();
-    ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().reverse());
     Ok(ranked_sentences)
     //let mut embeddings_array: Array2<f32> =
     //    Array::from(embeddings.to_vec()).into_shape_clone((no_seq, embed_dim))?;
@@ -239,7 +239,7 @@ pub fn ss_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
             let a = &matrix[i * c..(i + 1) * c];
             for j in (i + 1)..r {
                 let b = &matrix[j * c..(j + 1) * c];
-                row_i[j] = 1f32 - f32::cosine(a, b).unwrap() as f32; // upper-tri entry
+                row_i[j] = f32::cosine(a, b).unwrap() as f32; // upper-tri entry
             }
         });
 
