@@ -3,8 +3,8 @@ use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
 use lexrank_ndarray::{
-    flatten_vec_to_wide_matrix, lexrank_array, normalize_l2, similarity_matrix
-    , similarity_matrix_wide_opt,
+    flatten_vec_to_wide_matrix, lexrank_array, normalize_l2, similarity_matrix,
+    similarity_matrix_wide_opt,
 };
 use rayon::prelude::*;
 use std::hint::black_box;
@@ -20,8 +20,8 @@ pub fn ndarray_normalize_l2(c: &mut Criterion, dataset: &str, tensor_file: &str)
     c.bench_function(format!("ndarray_normalize_l2 {}", dataset).as_str(), |b| {
         b.iter(|| {
             black_box(embeds_vec.par_iter()).for_each(|(shape, vec)| {
-                let embeddings = array2_from_vec(vec, shape).unwrap();
-                let result = normalize_l2(black_box(&embeddings)).unwrap();
+                let mut embeddings = array2_from_vec(vec, shape).unwrap();
+                let result = normalize_l2(black_box(&mut embeddings));
                 black_box(result);
             });
         });
@@ -36,8 +36,8 @@ pub fn ndarray_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
     c.bench_function(format!("ndarray_cosine_sim {}", dataset).as_str(), |b| {
         b.iter(|| {
             embeds_vec.par_iter().for_each(|(shape, vec)| {
-                let embeddings = array2_from_vec(vec, shape).unwrap();
-                let result = similarity_matrix(black_box(&embeddings)).unwrap();
+                let mut embeddings = array2_from_vec(vec, shape).unwrap();
+                let result = similarity_matrix(black_box(&mut embeddings));
                 black_box(result);
             });
         });
@@ -118,7 +118,7 @@ pub fn benches() {
         //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
         ndarray_cosine_sim(&mut criterion, dataset, tensor_file);
         wide_cosine_sim(&mut criterion, dataset, tensor_file);
-        //ndarray_lexrank(&mut criterion, dataset, tensor_file);
+        ndarray_lexrank(&mut criterion, dataset, tensor_file);
     }
 }
 

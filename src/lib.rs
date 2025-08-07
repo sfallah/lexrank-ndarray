@@ -1,3 +1,16 @@
+use anyhow::Result;
+use ndarray::{Array, Array1, Array2, Axis, Ix0};
+use std::ops::{MulAssign, Sub};
+
+pub mod wide_impl;
+pub use wide_impl::{
+    flatten_vec_to_wide_matrix, similarity_matrix_wide, similarity_matrix_wide_opt, vec_to_row,
+    Wide, WideMatrix, WideRow,
+};
+
+#[cfg(feature = "testing")]
+pub mod testing;
+
 #[cfg(feature = "accelerate")]
 extern crate accelerate_src;
 #[cfg(feature = "blas")]
@@ -5,40 +18,28 @@ extern crate blis_src;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
 
-use std::ops::Sub;
-use anyhow::{anyhow, Result};
-use ndarray::{Array, Array1, Array2, Axis, Ix0};
-
-#[cfg(feature = "testing")]
-pub mod testing;
-mod wide_impl;
-
-pub use wide_impl::{flatten_vec_to_wide_matrix, similarity_matrix_wide, vec_to_row, similarity_matrix_wide_opt, WideRow, WideMatrix, Wide};
-
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
 }
 
-
-
-pub fn normalize_l2(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
-    let norm = embeddings
-        .pow2()
-        .sum_axis(Axis(1))
-        .sqrt()
-        .clamp(1e-12, f32::INFINITY);
-    let normed = embeddings / norm.insert_axis(Axis(1));
-    Ok(normed)
+#[inline(always)]
+pub fn normalize_l2(normed: &mut Array2<f32>) {
+    normed
+        .axis_iter_mut(Axis(0))
+        .into_iter()
+        .for_each(|mut row| {
+            let mut norm = row.pow2().sum().sqrt();
+            if norm <= 0.0 {
+                norm = 1.0; // Avoid division by zero
+            }
+            row.mul_assign(norm.recip());
+        });
 }
 
-
-
-
-
-pub fn similarity_matrix(embeddings: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
-    let normed = normalize_l2(embeddings)?;
-    let sim_matrix = normed.dot(&normed.t());
-    Ok(sim_matrix)
+#[inline(always)]
+pub fn similarity_matrix(embeddings: &mut Array2<f32>) -> Array2<f32> {
+    normalize_l2(embeddings);
+    embeddings.dot(&embeddings.t())
 }
 
 pub fn cos_similarity(embedding1: &Vec<f32>, embedding2: &Vec<f32>) -> anyhow::Result<f32> {
@@ -62,12 +63,6 @@ pub fn cos_similarity(embedding1: &Vec<f32>, embedding2: &Vec<f32>) -> anyhow::R
     Ok(sim)
 }
 
-/// Threshold each coefficient (`>= threshold → 1.0, else 0.0`)
-/// then scale every row so it sums to 1 (stochastic/Markov form).
-///
-/// Returns an error if a row’s sum is 0 or non‑finite.
-
-
 pub fn create_markov_matrix_discrete(
     weights_matrix: &Array2<f32>,
     threshold: f32,
@@ -90,22 +85,11 @@ pub fn create_markov_matrix(weights_matrix: &Array2<f32>) -> anyhow::Result<Arra
         Ok(weights_matrix / row_sum.insert_axis(Axis(1)))
     }
 }
-
-
-
 pub fn softmax(weights_matrix: &Array2<f32>) -> anyhow::Result<Array2<f32>> {
     let exp_vals = weights_matrix.mapv(f32::exp);
     let exp_sum = exp_vals.sum_axis(Axis(1));
     Ok(exp_vals / exp_sum.insert_axis(Axis(1)))
 }
-
-
-
-/// Numerically‑stable softmax over each row.
-///
-/// * If the matrix is empty the result is empty.
-/// * Every row keeps the same SIMD chunking as the input (no re‑packing).
-
 
 pub fn degree_centrality_scores(
     similarity_matrix: &Array2<f32>,
@@ -194,12 +178,10 @@ pub fn lexrank(
         return Ok(vec![]);
     }
     let embeddings_flatten: Vec<f32> = embeddings.iter().flatten().cloned().collect();
-    let embeddings_array: Array2<f32> = Array::from(embeddings_flatten)
+    let mut embeddings_array: Array2<f32> = Array::from(embeddings_flatten)
         .into_shape_clone((embeddings.len(), embeddings[0].len()))?;
-    lexrank_ts(&embeddings_array, threshold, max_iter)
+    lexrank_ts(&mut embeddings_array, threshold, max_iter)
 }
-
-
 
 pub fn lexrank_array(
     embeddings: &Vec<f32>,
@@ -207,24 +189,24 @@ pub fn lexrank_array(
     embed_dim: usize,
     threshold: Option<f32>,
     max_iter: usize,
-) -> anyhow::Result<Vec<(usize, f32)>> {
+) -> Result<Vec<(usize, f32)>> {
     if embeddings.is_empty() {
         return Ok(vec![]);
     }
-    let embeddings_array: Array2<f32> =
+    let mut embeddings_array: Array2<f32> =
         Array::from(embeddings.to_vec()).into_shape_clone((no_seq, embed_dim))?;
-    lexrank_ts(&embeddings_array, threshold, max_iter)
+    lexrank_ts(&mut embeddings_array, threshold, max_iter)
 }
 
 pub fn lexrank_ts(
-    embeddings_array: &Array2<f32>,
+    embeddings_array: &mut Array2<f32>,
     threshold: Option<f32>,
     max_iter: usize,
 ) -> anyhow::Result<Vec<(usize, f32)>> {
     if embeddings_array.shape()[0] == 0 {
         return Ok(vec![]);
     }
-    let sim_matrix = similarity_matrix(&embeddings_array)?;
+    let sim_matrix = similarity_matrix(embeddings_array);
     let threshold = threshold.map(|threshold| {
         let sim_min: f32 = sim_matrix.flatten().into_iter().reduce(f32::min).unwrap();
         //println!("sim_min: {:8.16}", sim_min);
@@ -239,5 +221,3 @@ pub fn lexrank_ts(
     ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     Ok(ranked_sentences)
 }
-
-
