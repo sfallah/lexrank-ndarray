@@ -2,7 +2,7 @@ use criterion::{criterion_main, Criterion};
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
-use lexrank_ndarray::{lexrank_array, normalize_l2, similarity_matrix};
+use lexrank_ndarray::{lexrank_array, normalize_l2, similarity_matrix, ss_cosine_f32_matrix};
 use rayon::prelude::*;
 use std::hint::black_box;
 use std::thread;
@@ -40,6 +40,23 @@ pub fn ndarray_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
         });
     });
 }
+
+pub fn simsimd_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
+    let splits = load_splits_data(tensor_file).unwrap();
+    let embeds_vec: Vec<_> = splits
+        .iter()
+        .map(|split| load_split_vec(tensor_file, split).unwrap())
+        .collect();
+    c.bench_function(format!("simsimd_cosine_sim {}", dataset).as_str(), |b| {
+        b.iter(|| {
+            embeds_vec.par_iter().for_each(|(shape, vec)| {
+                let result = ss_cosine_f32_matrix(&vec, shape[0], shape[1]);
+                black_box(result);
+            });
+        });
+    });
+}
+
 pub fn ndarray_lexrank(c: &mut Criterion, dataset: &str, tensor_file: &str) {
     let splits = load_splits_data(tensor_file).unwrap();
     let embeds_vec: Vec<_> = splits
