@@ -1,15 +1,33 @@
 use criterion::{criterion_main, Criterion};
+#[cfg(feature = "accelerate")]
+use lexrank_ndarray::cosine_f32_matrix;
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
 use lexrank_ndarray::{flatten_vec_to_wide_matrix, lexrank_array, normalize_l2, normalize_l2_par, normalize_l2_wide, normalize_l2_wide_par, similarity_matrix, similarity_matrix_mm, similarity_matrix_par, similarity_matrix_par_new, similarity_matrix_wide, similarity_matrix_wide_opt, similarity_matrix_wide_opt_par, similarity_matrix_wide_par};
-#[cfg(feature = "accelerate")]
-use lexrank_ndarray::cosine_f32_matrix;
 use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use std::hint::black_box;
 use std::thread;
 use std::time::{Duration, Instant};
-use rayon::ThreadPoolBuilder;
+
+#[cfg(feature = "accelerate")]
+fn rand_cosine_sim_acc(p0: &mut Criterion, rows: usize, cols: usize) {
+    let embeds = rand_matrix(rows, cols);
+
+    p0.bench_function("rand_cosine_sim_acc", |b| {
+        b.iter(|| cosine_f32_matrix(&embeds, rows, cols))
+    });
+}
+fn rand_matrix(rows: usize, cols: usize) -> Vec<f32> {
+    let mut embeds = vec![0f32; rows * cols];
+    embeds.par_chunks_mut(cols).for_each(|chunk| {
+        for i in 0..cols {
+            chunk[i] = rand::random::<f32>();
+        }
+    });
+    embeds
+}
 
 pub fn ndarray_normalize_l2(c: &mut Criterion, dataset: &str, tensor_file: &str) {
     let splits = load_splits_data(tensor_file).unwrap();
@@ -103,14 +121,17 @@ pub fn ndarray_cosine_sim_par(c: &mut Criterion, dataset: &str, tensor_file: &st
         .iter()
         .map(|split| load_split_vec(tensor_file, split).unwrap())
         .collect();
-    c.bench_function(format!("ndarray_cosine_sim_par {}", dataset).as_str(), |b| {
-        b.iter(|| {
-            embeds_vec.par_iter().for_each(|(shape, vec)| {
-                let mut embeddings = array2_from_vec(vec, shape).unwrap();
-                similarity_matrix_par(black_box(&mut embeddings));
+    c.bench_function(
+        format!("ndarray_cosine_sim_par {}", dataset).as_str(),
+        |b| {
+            b.iter(|| {
+                embeds_vec.par_iter().for_each(|(shape, vec)| {
+                    let mut embeddings = array2_from_vec(vec, shape).unwrap();
+                    similarity_matrix_par(black_box(&mut embeddings));
+                });
             });
-        });
-    });
+        },
+    );
 }
 
 pub fn ndarray_cosine_sim_par_new(c: &mut Criterion, dataset: &str, tensor_file: &str) {
@@ -119,15 +140,18 @@ pub fn ndarray_cosine_sim_par_new(c: &mut Criterion, dataset: &str, tensor_file:
         .iter()
         .map(|split| load_split_vec(tensor_file, split).unwrap())
         .collect();
-    c.bench_function(format!("ndarray_cosine_sim_par_new {}", dataset).as_str(), |b| {
-        b.iter(|| {
-            embeds_vec.par_iter().for_each(|(shape, vec)| {
-                let embeddings = array2_from_vec(vec, shape).unwrap();
-                let sims = similarity_matrix_par_new(black_box(&embeddings)).unwrap();
-                black_box(sims);
+    c.bench_function(
+        format!("ndarray_cosine_sim_par_new {}", dataset).as_str(),
+        |b| {
+            b.iter(|| {
+                embeds_vec.par_iter().for_each(|(shape, vec)| {
+                    let embeddings = array2_from_vec(vec, shape).unwrap();
+                    let sims = similarity_matrix_par_new(black_box(&embeddings)).unwrap();
+                    black_box(sims);
+                });
             });
-        });
-    });
+        },
+    );
 }
 
 pub fn wide_cosine_sim(c: &mut Criterion, dataset: &str, tensor_file: &str) {
@@ -210,7 +234,6 @@ pub fn benches() {
         .build()
         .unwrap();
 
-
     let mut criterion: Criterion<_> = Criterion::default()
         .sample_size(10)
         .measurement_time(std::time::Duration::from_secs(20))
@@ -237,12 +260,19 @@ pub fn benches() {
         //wide_normalize_l2_par(&mut criterion, dataset, tensor_file);
 
         // Cosine Similarity
-        ndarray_cosine_sim(&mut criterion, dataset, tensor_file);
-        ndarray_cosine_sim_par(&mut criterion, dataset, tensor_file);
-        ndarray_cosine_sim_par_new(&mut criterion, dataset, tensor_file);
+        //ndarray_cosine_sim(&mut criterion, dataset, tensor_file);
+        //ndarray_cosine_sim_par(&mut criterion, dataset, tensor_file);
+        //ndarray_cosine_sim_par_new(&mut criterion, dataset, tensor_file);
 
         #[cfg(feature = "accelerate")]
-        accelerate_cosine_sim(&mut criterion, dataset, tensor_file);
+        {
+            let n_rows = 32;
+            let n_cols = 1536;
+            rand_cosine_sim_acc(&mut criterion, n_rows, n_cols);
+            accelerate_cosine_sim(&mut criterion, dataset, tensor_file);
+        }
+
+
 
         //wide_cosine_sim(&mut criterion, dataset, tensor_file);
         //ndarray_lexrank(&mut criterion, dataset, tensor_file);
