@@ -1,7 +1,9 @@
 #[cfg(test)]
 pub mod tests {
-    use lexrank_ndarray::testing::{f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data};
-    use lexrank_ndarray::{cos_similarity, lexrank_ts, normalize_l2, similarity_matrix};
+    use lexrank_ndarray::testing::{
+        f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
+    };
+    use lexrank_ndarray::{cos_similarity, lexrank_array, normalize_l2, similarity_matrix};
     use ndarray::{array, Array1, Axis};
 
     #[test]
@@ -84,7 +86,9 @@ pub mod tests {
         let splits = load_splits_data(tensor_file)?;
         let mut embeddings = load_split_tensor(tensor_file, &splits[0])?;
         println!("{:8.16}", embeddings);
-        let lx_scores = lexrank_ts(&mut embeddings, None, 10000)?;
+        let shape = embeddings.shape();
+        let embeddings_flatten: Vec<f32> = embeddings.flatten().to_vec();
+        let lx_scores = lexrank_array(&embeddings_flatten, shape[0], shape[1], None, 10000)?;
         println!("{:?}", lx_scores);
         Ok(())
     }
@@ -106,7 +110,10 @@ pub mod tests {
             println!("{:?}", split_data.no_tokens);
             println!("{:?}", split_data.sentence_embeddings_file);
             let mut tensors = load_split_tensor(&test_data_path, &split_data)?;
-            let lx_rank = lexrank_ts(&mut tensors, None, 10000)?;
+            let shape = tensors.shape();
+            let tensors_flatten: Vec<f32> = tensors.flatten().to_vec();
+
+            let lx_rank = lexrank_array(&tensors_flatten, shape[0], shape[1], None, 10000)?;
             let lx_rank_str = lx_rank
                 .iter()
                 .map(|(idx, score)| format!("{:?}: {:.16}", idx, score))

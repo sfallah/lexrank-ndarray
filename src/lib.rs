@@ -176,9 +176,7 @@ pub fn lexrank(
         return Ok(vec![]);
     }
     let embeddings_flatten: Vec<f32> = embeddings.iter().flatten().cloned().collect();
-    let mut embeddings_array: Array2<f32> = Array::from(embeddings_flatten)
-        .into_shape_clone((embeddings.len(), embeddings[0].len()))?;
-    lexrank_ts(&mut embeddings_array, threshold, max_iter)
+    lexrank_array(&embeddings_flatten, embeddings.len(), embeddings[0].len(), threshold, max_iter)
 }
 
 pub fn lexrank_array(
@@ -191,26 +189,13 @@ pub fn lexrank_array(
     if embeddings.is_empty() {
         return Ok(vec![]);
     }
-    let mut embeddings_array: Array2<f32> =
-        Array::from(embeddings.to_vec()).into_shape_clone((no_seq, embed_dim))?;
-    lexrank_ts(&mut embeddings_array, threshold, max_iter)
-}
-
-pub fn lexrank_ts(
-    embeddings_array: &mut Array2<f32>,
-    threshold: Option<f32>,
-    max_iter: usize,
-) -> anyhow::Result<Vec<(usize, f32)>> {
-    if embeddings_array.shape()[0] == 0 {
-        return Ok(vec![]);
-    }
     let sim_flat = ss_cosine_f32_matrix(
-        &embeddings_array.flatten().to_vec(),
-        embeddings_array.shape()[0],
-        embeddings_array.shape()[1],
+        &embeddings,
+        no_seq,
+        embed_dim,
     );
     let sim_matrix = Array2::from_shape_vec(
-        (embeddings_array.shape()[0], embeddings_array.shape()[0]),
+        (no_seq, no_seq),
         sim_flat,
     )?;
     let threshold = threshold.map(|threshold| {
@@ -221,12 +206,17 @@ pub fn lexrank_ts(
     });
     let scores = degree_centrality_scores(&sim_matrix, false, threshold, max_iter, true)?;
     let scores_vec: Vec<f32> = scores.flatten().to_vec();
-    let mut ranked_sentences: Vec<_> = (0..embeddings_array.shape()[0] as usize)
+    let mut ranked_sentences: Vec<_> = (0..no_seq as usize)
         .zip(scores_vec)
         .collect();
     ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     Ok(ranked_sentences)
+    //let mut embeddings_array: Array2<f32> =
+    //    Array::from(embeddings.to_vec()).into_shape_clone((no_seq, embed_dim))?;
+    //lexrank_ts(&mut embeddings_array, threshold, max_iter)
 }
+
+
 
 pub fn ss_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     assert_eq!(matrix.len(), r * c);
