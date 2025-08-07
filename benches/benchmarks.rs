@@ -118,6 +118,7 @@ pub fn benches() {
 
         // Cosine Similarity
         ndarray_cosine_sim(&mut criterion, dataset, tensor_file);
+        simsimd_cosine_sim(&mut criterion, dataset, tensor_file);
 
         ndarray_lexrank(&mut criterion, dataset, tensor_file);
     }
