@@ -19,7 +19,7 @@ pub mod tests {
 
     #[test]
     fn ndarray_cosine_sim() -> anyhow::Result<()> {
-        let mut embeds = Array1::range(0f32, 10., 1.).into_shape_clone((2, 5))?;
+        let embeds = Array1::range(0f32, 10., 1.).into_shape_clone((2, 5))?;
         let mut embeds_normed = embeds.clone();
         normalize_l2(&mut embeds_normed);
         assert_eq!(embeds_normed.shape(), [2, 5]);

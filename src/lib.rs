@@ -1,4 +1,5 @@
 use ndarray::{Array, Array1, Array2, Axis, Ix0};
+use rayon::prelude::*;
 
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -9,6 +10,8 @@ extern crate accelerate_src;
 extern crate blis_src;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
+
+use simsimd::SpatialSimilarity;
 
 use anyhow::Result;
 use std::ops::{MulAssign, Sub};
@@ -201,7 +204,15 @@ pub fn lexrank_ts(
     if embeddings_array.shape()[0] == 0 {
         return Ok(vec![]);
     }
-    let sim_matrix = similarity_matrix(embeddings_array);
+    let sim_flat = ss_cosine_f32_matrix(
+        &embeddings_array.flatten().to_vec(),
+        embeddings_array.shape()[0],
+        embeddings_array.shape()[1],
+    );
+    let sim_matrix = Array2::from_shape_vec(
+        (embeddings_array.shape()[0], embeddings_array.shape()[0]),
+        sim_flat,
+    )?;
     let threshold = threshold.map(|threshold| {
         let sim_min: f32 = sim_matrix.flatten().into_iter().reduce(f32::min).unwrap();
         //println!("sim_min: {:8.16}", sim_min);
@@ -217,3 +228,38 @@ pub fn lexrank_ts(
     Ok(ranked_sentences)
 }
 
+pub fn ss_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
+    assert_eq!(matrix.len(), r * c);
+
+    // ❶ allocate the square result (row-major)
+    let mut result = vec![0.0f32; r * r];
+
+    // ❷ process each *row slice* of `result` in parallel
+    //
+    // `par_chunks_mut(r)` splits the buffer into disjoint mutable chunks,
+    // one per row, so every thread owns a unique region and no locks are needed.
+    result
+        .par_chunks_mut(r) // &mut [f32] for one row
+        .enumerate() // (i, row_i)
+        .for_each(|(i, row_i)| {
+            // -- diagonal --
+            row_i[i] = 1.0;
+
+            // -- upper triangle: j > i --
+            let a = &matrix[i * c..(i + 1) * c];
+            for j in (i + 1)..r {
+                let b = &matrix[j * c..(j + 1) * c];
+                row_i[j] = 1f32 - f32::cosine(a, b).unwrap() as f32; // upper-tri entry
+            }
+        });
+
+    // ❸ mirror the upper triangle → lower triangle (cheap, serial)
+    for i in 0..r {
+        for j in (i + 1)..r {
+            let sim = result[i * r + j];
+            result[j * r + i] = sim;
+        }
+    }
+
+    result
+}
