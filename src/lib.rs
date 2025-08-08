@@ -212,7 +212,7 @@ pub fn lexrank_array(
     let mut ranked_sentences: Vec<_> = (0..no_seq as usize)
         .zip(scores_vec)
         .collect();
-    ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().reverse());
+    ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     Ok(ranked_sentences)
     //let mut embeddings_array: Array2<f32> =
     //    Array::from(embeddings.to_vec()).into_shape_clone((no_seq, embed_dim))?;
