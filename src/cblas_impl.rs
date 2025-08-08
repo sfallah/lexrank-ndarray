@@ -6,9 +6,7 @@ use rayon::prelude::*;
 extern crate accelerate_src;
 extern crate cblas;
 #[cfg(feature = "blas")]
-extern crate blis_src;
-
-use simsimd::SpatialSimilarity;
+extern crate openblas_src;
 
 #[inline(always)]
 pub fn blas_norm2_f32(vec: &[f32]) -> f32 {
