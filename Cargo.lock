@@ -66,6 +66,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 
 [[package]]
+name = "blas-src"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bae1f9c995f3deabb3eff7ed9272369a6f260e961c8723779b951c35056c45d"
+dependencies = [
+ "accelerate-src",
+ "openblas-src",
+]
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -448,6 +458,7 @@ version = "0.1.0"
 dependencies = [
  "accelerate-src",
  "anyhow",
+ "blas-src",
  "cblas",
  "criterion",
  "memmap2",
