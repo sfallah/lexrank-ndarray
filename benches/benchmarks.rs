@@ -1,4 +1,5 @@
 use criterion::{criterion_main, Criterion};
+use lexrank_ndarray::cblas_impl::blas_cosine_f32_matrix;
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
@@ -86,6 +87,17 @@ pub fn simsimd_cosine_sim(
     });
 }
 
+pub fn blas_cosine_sim(c: &mut Criterion, dataset: &str, embeds_vec: &Vec<(Vec<usize>, Vec<f32>)>) {
+    c.bench_function(format!("blas_cosine_sim {}", dataset).as_str(), |b| {
+        b.iter(|| {
+            embeds_vec.par_iter().for_each(|(shape, vec)| {
+                let result = blas_cosine_f32_matrix(vec, shape[0], shape[1]);
+                black_box(result);
+            });
+        });
+    });
+}
+
 pub fn ndarray_lexrank(c: &mut Criterion, dataset: &str, embeds_vec: &Vec<(Vec<usize>, Vec<f32>)>) {
     c.bench_function(format!("ndarray_lexrank {}", dataset).as_str(), |b| {
         b.iter(|| {
@@ -127,11 +139,17 @@ pub fn benches() {
             .unwrap()
             .0[0];
         // Random Cosine Similarity
-        let cols = embeds_vec[0].0[1]; // Dimension of the embeddings
-        println!("Generate rand_embeds for Dataset: {}, Rows: {}, Cols: {}", dataset, rows, cols);
-        let rand_embeds: Vec<f32> = rand_matrix(rows, cols);
-        ndarray_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
-        simsimd_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
+        let run_rand_benches = false; // Set to true to run random embeddings benchmarks
+        if run_rand_benches {
+            let cols = embeds_vec[0].0[1]; // Dimension of the embeddings
+            println!(
+                "Generate rand_embeds for Dataset: {}, Rows: {}, Cols: {}",
+                dataset, rows, cols
+            );
+            let rand_embeds: Vec<f32> = rand_matrix(rows, cols);
+            ndarray_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
+            simsimd_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
+        }
 
         // Ndarray Normalization
         //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
@@ -140,6 +158,7 @@ pub fn benches() {
         // Cosine Similarity
         ndarray_cosine_sim(&mut criterion, dataset, &embeds_vec);
         simsimd_cosine_sim(&mut criterion, dataset, &embeds_vec);
+        blas_cosine_sim(&mut criterion, dataset, &embeds_vec);
 
         ndarray_lexrank(&mut criterion, dataset, &embeds_vec);
     }

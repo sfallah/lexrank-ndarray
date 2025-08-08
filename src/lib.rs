@@ -1,8 +1,10 @@
+
 use ndarray::{Array, Array1, Array2, Axis, Ix0};
 use rayon::prelude::*;
 
 #[cfg(feature = "testing")]
 pub mod testing;
+pub mod cblas_impl;
 
 #[cfg(feature = "accelerate")]
 extern crate accelerate_src;
@@ -10,11 +12,14 @@ extern crate accelerate_src;
 extern crate blis_src;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
+extern crate cblas;
+
 
 use simsimd::SpatialSimilarity;
 
 use anyhow::Result;
 use std::ops::{MulAssign, Sub};
+use crate::cblas_impl::blas_cosine_f32_matrix;
 
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
@@ -189,7 +194,7 @@ pub fn lexrank_array(
     if embeddings.is_empty() {
         return Ok(vec![]);
     }
-    let sim_flat = ss_cosine_f32_matrix(
+    let sim_flat = blas_cosine_f32_matrix(
         &embeddings,
         no_seq,
         embed_dim,
