@@ -85,7 +85,7 @@ pub fn get_rand_arr1_f32(
     Ok(rnd_arr)
 }
 
-pub fn array2_from_vec(vec: &Vec<f32>, shape: &Vec<usize>) -> anyhow::Result<Array2<f32>> {
+pub fn array2_from_vec(vec: &[f32], shape: &Vec<usize>) -> anyhow::Result<Array2<f32>> {
     if shape.len() != 2 {
         return Err(anyhow::anyhow!("Shape must have 2 dimensions"));
     }
