@@ -5,6 +5,7 @@ pub mod tests {
     };
     use lexrank_ndarray::{cos_similarity, lexrank_array, normalize_l2, similarity_matrix};
     use ndarray::{array, Array1, Axis};
+    use lexrank_ndarray::cblas_impl::blas_lexrank_array;
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
@@ -134,6 +135,46 @@ pub mod tests {
         Ok(())
     }
 
+    #[test]
+    fn blas_superlinear_summary() -> anyhow::Result<()> {
+        //let test_data_path = "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2";
+        //let test_data_path = "tests/test_data/superlinear_embeddings/snowflake-arctic-embed-m-v1.5";
+        //let test_data_path = "tests/test_data/superlinear_embeddings/bge-reranker-v2";
+        let test_data_path = "tests/test_data/superlinear_embeddings/gte-Qwen2-1.5B-instruct";
+
+        let splits_data = load_splits_data(&test_data_path)?;
+        println!("{:?}", splits_data.len());
+        for split_data in splits_data.iter() {
+            println!(
+                "################# {:?} #################",
+                split_data.split_id
+            );
+            println!("{:?}", split_data.no_tokens);
+            println!("{:?}", split_data.sentence_embeddings_file);
+            let mut tensors = load_split_tensor(&test_data_path, &split_data)?;
+            let shape = tensors.shape();
+            let tensors_flatten: Vec<f32> = tensors.flatten().to_vec();
+
+            let lx_rank = blas_lexrank_array(&tensors_flatten, shape[0], shape[1], None, 10000)?;
+            let lx_rank_str = lx_rank
+                .iter()
+                .map(|(idx, score)| format!("{:?}: {:.16}", idx, score))
+                .collect::<Vec<String>>();
+            println!("{:?}", lx_rank_str);
+            let tops: Vec<_> = lx_rank.iter().take(2).collect();
+            let summary: Vec<_> = tops
+                .iter()
+                .map(|(idx, _)| (idx, split_data.sentences.get(*idx).unwrap().clone()))
+                .collect();
+            println!("\nSummaries:");
+            summary.iter().for_each(|(idx, sentence)| {
+                println!("\t{:?} {:?}", idx, sentence);
+            });
+            println!("\n\n");
+        }
+
+        Ok(())
+    }
     #[test]
     fn normalize_l2_test() -> anyhow::Result<()> {
         let mut a = array![[1.0f32, 2., 3.], [4., 5., 6.],];
