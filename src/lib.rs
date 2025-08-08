@@ -238,7 +238,15 @@ pub fn lexrank_ts(
     if embeddings_array.shape()[0] == 0 {
         return Ok(vec![]);
     }
-    let sim_matrix = similarity_matrix(&embeddings_array)?;
+    let embeddings_flat = embeddings_array.flatten().to_vec();
+    let shape = embeddings_array.shape();
+    let sim_matrix = cosine_f32_matrix(
+        &embeddings_flat,
+        shape[0], // number of rows
+        shape[1], // number of columns
+    );
+    let sim_matrix: Array2<f32> = Array::from_shape_vec((shape[0], shape[0]), sim_matrix)?;
+    //let sim_matrix = similarity_matrix(&embeddings_array)?;
     let threshold = threshold.map(|threshold| {
         let sim_min: f32 = sim_matrix.flatten().into_iter().reduce(f32::min).unwrap();
         //println!("sim_min: {:8.16}", sim_min);
@@ -435,8 +443,6 @@ pub fn cosine_f64(a: &[f64], b: &[f64]) -> f64 {
     };
     dot / (norm2_f64(a) * norm2_f64(b))
 }
-
-
 
 /// Build an m × n cosine-similarity matrix between two row-major matrices
 /// stored as flat vectors (row stride = d).  The result is returned in C.
