@@ -10,7 +10,6 @@ rayon = "1.10.0"
 anyhow = "1.0.89"
 accelerate-src = { version = "0.3.2", optional = true }
 openblas-src = { version = "0.10.12", optional = true }
-blas-src = { version = "0.12.1", optional = true }
 cblas = "0.5.0"
 # Optional dependencies for test and benchmarks
 ndarray-rand = { version = "0.15.0", optional = true }
@@ -28,10 +27,9 @@ criterion = { version = "0.7.0", default-features = false }
 
 [features]
 default = []
-accelerate = ["accelerate-src", "blas-src/accelerate", "ndarray/blas"]
-blas = ["openblas-src", "blas-src/openblas", "ndarray/blas"]
+accelerate = ["accelerate-src", "ndarray/blas"]
+blas = ["openblas-src", "ndarray/blas"]
 testing = ["ndarray-rand", "memmap2", "safetensors", "serde_json", "serde"]
-blas-src = ["dep:blas-src"]
 
 [[test]]
 name = "tests"
