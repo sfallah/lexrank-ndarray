@@ -7,8 +7,6 @@ use lexrank_ndarray::{lexrank_array, normalize_l2, similarity_matrix, ss_cosine_
 use ndarray_rand::rand;
 use rayon::prelude::*;
 use std::hint::black_box;
-use std::thread;
-use std::time::{Duration, Instant};
 
 fn rand_matrix(rows: usize, cols: usize) -> Vec<f32> {
     let mut embeds = vec![0f32; rows * cols];
