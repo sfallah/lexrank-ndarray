@@ -9,6 +9,8 @@ extern crate cblas;
 extern crate openblas_src;
 #[cfg(feature = "blis")]
 extern crate blis_src;
+#[cfg(feature = "mkl")]
+extern crate intel_mkl_src;
 
 /// Apply soft-max row-wise to an `m × n` matrix stored row-major.
 ///
