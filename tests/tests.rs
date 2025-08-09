@@ -1,11 +1,15 @@
 #[cfg(test)]
 pub mod tests {
+    use rayon::prelude::*;
     use lexrank_ndarray::testing::{
         f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
     };
-    use lexrank_ndarray::{cos_similarity, lexrank_array, normalize_l2, similarity_matrix};
-    use ndarray::{array, Array1, Axis};
-    use lexrank_ndarray::cblas_impl::blas_lexrank_array;
+    use lexrank_ndarray::{cos_similarity, lexrank_array, normalize_l2, similarity_matrix, softmax};
+    use ndarray::{array, Array1, Array2, Axis};
+    use rayon::prelude::ParallelSliceMut;
+    use lexrank_ndarray::cblas_impl::{blas_cosine_f32_matrix, blas_lexrank_array, blas_softmax};
+    use simsimd::SpatialSimilarity;
+
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {
@@ -180,6 +184,51 @@ pub mod tests {
         let mut a = array![[1.0f32, 2., 3.], [4., 5., 6.],];
         normalize_l2(&mut a);
         println!("{:8.12}", a);
+        Ok(())
+    }
+
+    fn rand_matrix(rows: usize, cols: usize) -> Vec<f32> {
+        let mut embeds = vec![0f32; rows * cols];
+        embeds.par_chunks_mut(cols).for_each(|chunk| {
+            for i in 0..cols {
+                chunk[i] = rand::random::<f32>();
+            }
+        });
+        embeds
+    }
+    #[test]
+    fn test_cosine_f32_matrix() {
+        let rows = 3;
+        let cols = 4;
+        let embeds = rand_matrix(rows, cols);
+        let result = blas_cosine_f32_matrix(&embeds, rows, cols);
+        assert_eq!(result.len(), rows * rows);
+        let sim_array = Array2::from_shape_vec((rows, rows), result).unwrap();
+        println!("{:8.16}", sim_array);
+
+        let mut simsimd_result = vec![0.0f32; rows * rows];
+        for i in 0..rows {
+            let a = &embeds[i * cols..(i + 1) * cols];
+            for j in 0..rows {
+                let b = &embeds[j * cols..(j + 1) * cols];
+                let ss_cosine = 1.0 - f32::cosine(a, b).unwrap();
+                simsimd_result[i * rows + j] = ss_cosine as f32;
+                simsimd_result[j * rows + i] = ss_cosine as f32; // mirror
+            }
+        }
+        let simsimd_array = Array2::from_shape_vec((rows, rows), simsimd_result).unwrap();
+        println!("{:8.16}", simsimd_array);
+    }
+    #[test]
+    fn test_softmax() -> anyhow::Result<()> {
+        let rand_matrix = rand_matrix(4, 4);
+        let arr = Array2::from_shape_vec((4, 4), rand_matrix.clone())?;
+        println!("Before softmax:\n{:8.16}", arr);
+        let nd_softmaxed = softmax(&arr)?;
+        println!("After softmax:\n{:8.16}", nd_softmaxed);
+        let blas_softmaxed = blas_softmax(&rand_matrix, 4, 4);
+        let blas_softmaxed_arr = Array2::from_shape_vec((4, 4), blas_softmaxed)?;
+        println!("After blas softmax:\n{:8.16}", blas_softmaxed_arr);
         Ok(())
     }
 }

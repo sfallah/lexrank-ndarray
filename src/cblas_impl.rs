@@ -1,6 +1,5 @@
 use anyhow::bail;
 use cblas::*;
-use ndarray::{Array1, Array2};
 use rayon::prelude::*;
 
 #[cfg(feature = "accelerate")]
@@ -407,44 +406,4 @@ pub fn blas_lexrank_array(
     ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
     Ok(ranked)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ndarray::Array2;
-    use simsimd::SpatialSimilarity;
-
-    fn rand_matrix(rows: usize, cols: usize) -> Vec<f32> {
-        let mut embeds = vec![0f32; rows * cols];
-        embeds.par_chunks_mut(cols).for_each(|chunk| {
-            for i in 0..cols {
-                chunk[i] = rand::random::<f32>();
-            }
-        });
-        embeds
-    }
-    #[test]
-    fn test_cosine_f32_matrix() {
-        let rows = 3;
-        let cols = 4;
-        let embeds = rand_matrix(rows, cols);
-        let result = blas_cosine_f32_matrix(&embeds, rows, cols);
-        assert_eq!(result.len(), rows * rows);
-        let sim_array = Array2::from_shape_vec((rows, rows), result).unwrap();
-        println!("{:8.16}", sim_array);
-
-        let mut simsimd_result = vec![0.0f32; rows * rows];
-        for i in 0..rows {
-            let a = &embeds[i * cols..(i + 1) * cols];
-            for j in 0..rows {
-                let b = &embeds[j * cols..(j + 1) * cols];
-                let ss_cosine = 1.0 - f32::cosine(a, b).unwrap();
-                simsimd_result[i * rows + j] = ss_cosine as f32;
-                simsimd_result[j * rows + i] = ss_cosine as f32; // mirror
-            }
-        }
-        let simsimd_array = Array2::from_shape_vec((rows, rows), simsimd_result).unwrap();
-        println!("{:8.16}", simsimd_array);
-    }
 }
