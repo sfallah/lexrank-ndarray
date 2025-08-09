@@ -1,14 +1,47 @@
 use criterion::{criterion_main, Criterion};
-use lexrank_ndarray::cblas_impl::{
-    blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_lexrank_array,
-};
+use lexrank_ndarray::cblas_impl::{blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_lexrank_array, blas_softmax, blas_softmax_opt};
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
-use lexrank_ndarray::{lexrank_array, normalize_l2, similarity_matrix, ss_cosine_f32_matrix};
+use lexrank_ndarray::{
+    lexrank_array, normalize_l2, similarity_matrix, softmax, ss_cosine_f32_matrix,
+};
 use ndarray_rand::rand;
 use rayon::prelude::*;
 use std::hint::black_box;
+
+fn ndarray_softmax_bench(c: &mut Criterion, embeds: &[f32], rows: usize, cols: usize) {
+    let shape = vec![rows, cols];
+    let mut embeddings = array2_from_vec(embeds, &shape).unwrap();
+    let sim_matrix = similarity_matrix(&mut embeddings);
+    c.bench_function("ndarray_softmax_bench", |b| {
+        b.iter(|| {
+            let result = softmax(black_box(&sim_matrix)).unwrap();
+            black_box(result);
+        });
+    });
+}
+fn blas_softmax_bench(c: &mut Criterion, embeds: &[f32], rows: usize, cols: usize) {
+    let sim_matrix = blas_cosine_f32_matrix(embeds, rows, cols);
+    assert_eq!(sim_matrix.len(), rows * rows);
+    c.bench_function("blas_softmax_bench", |b| {
+        b.iter(|| {
+            let result = blas_softmax(black_box(&sim_matrix), rows, rows);
+            black_box(result);
+        });
+    });
+}
+
+fn blas_softmax_opt_bench(c: &mut Criterion, embeds: &[f32], rows: usize, cols: usize) {
+    let sim_matrix = blas_cosine_f32_matrix_opt(embeds, rows, cols);
+    assert_eq!(sim_matrix.len(), rows * rows);
+    c.bench_function("blas_softmax_opt_bench", |b| {
+        b.iter(|| {
+            let result = blas_softmax_opt(black_box(&sim_matrix), rows, rows);
+            black_box(result);
+        });
+    });
+}
 
 fn rand_matrix(rows: usize, cols: usize) -> Vec<f32> {
     let mut embeds = vec![0f32; rows * cols];
@@ -189,7 +222,7 @@ pub fn benches() {
             .unwrap()
             .0[0];
         // Random Cosine Similarity
-        let run_rand_benches = false; // Set to true to run random embeddings benchmarks
+        let run_rand_benches = true; // Set to true to run random embeddings benchmarks
         if run_rand_benches {
             let cols = embeds_vec[0].0[1]; // Dimension of the embeddings
             println!(
@@ -197,13 +230,17 @@ pub fn benches() {
                 dataset, rows, cols
             );
             let rand_embeds: Vec<f32> = rand_matrix(rows, cols);
-            ndarray_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
-            simsimd_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
+            //ndarray_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
+            //simsimd_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
+            ndarray_softmax_bench(&mut criterion, &rand_embeds, rows, cols);
+            blas_softmax_bench(&mut criterion, &rand_embeds, rows, cols);
+            blas_softmax_opt_bench(&mut criterion, &rand_embeds, rows, cols);
+
             blas_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
             blas_rand_cosine_sim_opt(&mut criterion, &rand_embeds, rows, cols);
         }
 
-        let run_dataset_benches = true; // Set to true to run dataset benchmarks
+        let run_dataset_benches = false; // Set to true to run dataset benchmarks
         if run_dataset_benches {
             // Ndarray Normalization
             //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);

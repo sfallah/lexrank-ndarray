@@ -448,3 +448,33 @@ pub fn blas_cosine_f32_matrix_opt(matrix: &[f32], r: usize, c: usize) -> Vec<f32
     gram
 }
 
+
+pub fn blas_softmax_opt(weights: &[f32], m: usize, n: usize) -> Vec<f32> {
+    assert_eq!(weights.len(), m * n);
+    let mut out = vec![0.0f32; m * n];
+
+    // Option A: outer parallelism → set BLAS to single-thread (see §4).
+    // rayon::scope(|s| { for r in 0..m { s.spawn(move |_| { ... }) } });
+    for r in 0..m {
+        let row = &weights[r * n..(r + 1) * n];
+        let dst = &mut out[r * n..(r + 1) * n];
+
+        // 1) row max
+        let xmax = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+
+        // 2) exp(x - xmax) and sum
+        let mut sum = 0.0f32;
+        for (d, &x) in dst.iter_mut().zip(row) {
+            let e = (x - xmax).exp();
+            *d = e;
+            sum += e;
+        }
+
+        // 3) scale row by 1/sum (BLAS Level-1)
+        let inv = 1.0 / sum;
+        unsafe { sscal(n as i32, inv, dst, 1) };
+    }
+
+    out
+}
+
