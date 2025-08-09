@@ -1,5 +1,7 @@
 use criterion::{criterion_main, Criterion};
-use lexrank_ndarray::cblas_impl::{blas_cosine_f32_matrix, blas_lexrank_array};
+use lexrank_ndarray::cblas_impl::{
+    blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_lexrank_array,
+};
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };
@@ -33,6 +35,26 @@ pub fn simsimd_rand_cosine_sim(c: &mut Criterion, embeds: &[f32], rows: usize, c
     c.bench_function("simsimd_rand_cosine_sim", |b| {
         b.iter(|| {
             let result = ss_cosine_f32_matrix(embeds, rows, cols);
+            black_box(result);
+        });
+    });
+}
+
+pub fn blas_rand_cosine_sim(c: &mut Criterion, embeds: &[f32], rows: usize, cols: usize) {
+    let shape = vec![rows, cols];
+    c.bench_function("blas_rand_cosine_sim", |b| {
+        b.iter(|| {
+            let result = blas_cosine_f32_matrix(black_box(embeds), rows, cols);
+            black_box(result);
+        });
+    });
+}
+
+pub fn blas_rand_cosine_sim_opt(c: &mut Criterion, embeds: &[f32], rows: usize, cols: usize) {
+    let shape = vec![rows, cols];
+    c.bench_function("blas_rand_cosine_sim_opt", |b| {
+        b.iter(|| {
+            let result = blas_cosine_f32_matrix_opt(black_box(embeds), rows, cols);
             black_box(result);
         });
     });
@@ -96,6 +118,21 @@ pub fn blas_cosine_sim(c: &mut Criterion, dataset: &str, embeds_vec: &Vec<(Vec<u
     });
 }
 
+pub fn blas_cosine_sim_opt(
+    c: &mut Criterion,
+    dataset: &str,
+    embeds_vec: &Vec<(Vec<usize>, Vec<f32>)>,
+) {
+    c.bench_function(format!("blas_cosine_sim_opt {}", dataset).as_str(), |b| {
+        b.iter(|| {
+            embeds_vec.par_iter().for_each(|(shape, vec)| {
+                let result = blas_cosine_f32_matrix_opt(vec, shape[0], shape[1]);
+                black_box(result);
+            });
+        });
+    });
+}
+
 pub fn ndarray_lexrank(c: &mut Criterion, dataset: &str, embeds_vec: &Vec<(Vec<usize>, Vec<f32>)>) {
     c.bench_function(format!("ndarray_lexrank {}", dataset).as_str(), |b| {
         b.iter(|| {
@@ -107,7 +144,11 @@ pub fn ndarray_lexrank(c: &mut Criterion, dataset: &str, embeds_vec: &Vec<(Vec<u
     });
 }
 
-pub fn blas_ndarray_lexrank(c: &mut Criterion, dataset: &str, embeds_vec: &Vec<(Vec<usize>, Vec<f32>)>) {
+pub fn blas_ndarray_lexrank(
+    c: &mut Criterion,
+    dataset: &str,
+    embeds_vec: &Vec<(Vec<usize>, Vec<f32>)>,
+) {
     c.bench_function(format!("blas_ndarray_lexrank {}", dataset).as_str(), |b| {
         b.iter(|| {
             embeds_vec.par_iter().for_each(|(shape, vec)| {
@@ -158,19 +199,29 @@ pub fn benches() {
             let rand_embeds: Vec<f32> = rand_matrix(rows, cols);
             ndarray_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
             simsimd_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
+            blas_rand_cosine_sim(&mut criterion, &rand_embeds, rows, cols);
+            blas_rand_cosine_sim_opt(&mut criterion, &rand_embeds, rows, cols);
         }
 
-        // Ndarray Normalization
-        //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
-        //ndarray_normalize_l2_par(&mut criterion, dataset, tensor_file);
+        let run_dataset_benches = true; // Set to true to run dataset benchmarks
+        if run_dataset_benches {
+            // Ndarray Normalization
+            //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
+            //ndarray_normalize_l2_par(&mut criterion, dataset, tensor_file);
 
-        // Cosine Similarity
-        ndarray_cosine_sim(&mut criterion, dataset, &embeds_vec);
-        simsimd_cosine_sim(&mut criterion, dataset, &embeds_vec);
-        blas_cosine_sim(&mut criterion, dataset, &embeds_vec);
+            // Cosine Similarity
+            //ndarray_cosine_sim(&mut criterion, dataset, &embeds_vec);
+            //simsimd_cosine_sim(&mut criterion, dataset, &embeds_vec);
+            blas_cosine_sim(&mut criterion, dataset, &embeds_vec);
+            blas_cosine_sim_opt(&mut criterion, dataset, &embeds_vec);
+        }
 
-        ndarray_lexrank(&mut criterion, dataset, &embeds_vec);
-        blas_ndarray_lexrank(&mut criterion, dataset, &embeds_vec);
+        let run_lexrank_benches = false; // Set to true to run lexrank benchmarks
+        if run_lexrank_benches {
+            // LexRank
+            ndarray_lexrank(&mut criterion, dataset, &embeds_vec);
+            blas_ndarray_lexrank(&mut criterion, dataset, &embeds_vec);
+        }
     }
 }
 

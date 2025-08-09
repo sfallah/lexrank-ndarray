@@ -407,3 +407,44 @@ pub fn blas_lexrank_array(
 
     Ok(ranked)
 }
+
+pub fn blas_cosine_f32_matrix_opt(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
+    assert_eq!(matrix.len(), r * c);
+
+    // 1) G = M · Mᵀ   (r×c) · (c×r) -> (r×r)
+    let mut gram = vec![0.0f32; r * r];
+    unsafe {
+        sgemm(
+            Layout::RowMajor,
+            Transpose::None,   // M
+            Transpose::Ordinary,  // Mᵀ
+            r as i32, r as i32, c as i32,
+            1.0,
+            matrix, c as i32,
+            matrix, c as i32,
+            0.0,
+            &mut gram, r as i32,
+        );
+    }
+
+    // 2) norms (avoid div-by-zero)
+    let mut norms = vec![0.0f32; r];
+    for i in 0..r {
+        let ni = blas_norm2_f32(&matrix[i * c..(i + 1) * c]).max(f32::MIN_POSITIVE);
+        norms[i] = ni;
+    }
+
+    // 3) divide by outer product of norms: C[i,j] /= norms[i]*norms[j]
+    //    First scale rows, then columns (sscal supports strided columns).
+    for i in 0..r {
+        unsafe { sscal(r as i32, 1.0 / norms[i], &mut gram[i * r..], 1) };
+    }
+    for j in 0..r {
+        unsafe { sscal(r as i32, 1.0 / norms[j], &mut gram[j..], r as i32) };
+    }
+
+    // 4) clamp diagonal to 1 (small num errors)
+    for i in 0..r { gram[i * r + i] = 1.0; }
+    gram
+}
+
