@@ -10,10 +10,11 @@ extern crate accelerate_src;
 extern crate cblas;
 #[cfg(feature = "blas")]
 extern crate openblas_src;
+#[cfg(feature = "blis")]
+extern crate blis_src;
 
 use simsimd::SpatialSimilarity;
 
-use crate::cblas_impl::blas_cosine_f32_matrix;
 use anyhow::Result;
 use std::ops::{MulAssign, Sub};
 
