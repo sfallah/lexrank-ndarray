@@ -243,7 +243,7 @@ pub fn benches() {
             blas_rand_cosine_sim_opt(&mut criterion, &rand_embeds, rows, cols);
         }
 
-        let run_dataset_benches = false; // Set to true to run dataset benchmarks
+        let run_dataset_benches = true; // Set to true to run dataset benchmarks
         if run_dataset_benches {
             // Ndarray Normalization
             //ndarray_normalize_l2(&mut criterion, dataset, tensor_file);
@@ -256,7 +256,7 @@ pub fn benches() {
             blas_cosine_sim_opt(&mut criterion, dataset, &embeds_vec);
         }
 
-        let run_lexrank_benches = false; // Set to true to run lexrank benchmarks
+        let run_lexrank_benches = true; // Set to true to run lexrank benchmarks
         if run_lexrank_benches {
             // LexRank
             ndarray_lexrank(&mut criterion, dataset, &embeds_vec);
