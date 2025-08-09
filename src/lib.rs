@@ -196,8 +196,8 @@ pub fn lexrank_array(
     if embeddings.is_empty() {
         return Ok(vec![]);
     }
-    let sim_flat = blas_cosine_f32_matrix(&embeddings, no_seq, embed_dim);
-    let sim_matrix = Array2::from_shape_vec((no_seq, no_seq), sim_flat)?;
+    let mut embeddings = Array2::from_shape_vec((no_seq, embed_dim), embeddings.clone())?;
+    let sim_matrix = similarity_matrix(&mut embeddings);
     let threshold = threshold.map(|threshold| {
         let sim_min: f32 = sim_matrix.flatten().into_iter().reduce(f32::min).unwrap();
         //println!("sim_min: {:8.16}", sim_min);

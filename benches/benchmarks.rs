@@ -219,15 +219,16 @@ pub fn benches() {
             .map(|split| load_split_vec(tensor_file, split).unwrap())
             .collect();
 
-        let rows = embeds_vec
-            .iter()
-            .max_by(|a, b| a.0[0].cmp(&b.0[0]))
-            .unwrap()
-            .0[0];
         // Random Cosine Similarity
-        let run_rand_benches = true; // Set to true to run random embeddings benchmarks
+        let run_rand_benches = false; // Set to true to run random embeddings benchmarks
         if run_rand_benches {
+            let rows = embeds_vec
+                .iter()
+                .max_by(|a, b| a.0[0].cmp(&b.0[0]))
+                .unwrap()
+                .0[0];
             let cols = embeds_vec[0].0[1]; // Dimension of the embeddings
+            
             println!(
                 "Generate rand_embeds for Dataset: {}, Rows: {}, Cols: {}",
                 dataset, rows, cols
@@ -250,7 +251,7 @@ pub fn benches() {
             //ndarray_normalize_l2_par(&mut criterion, dataset, tensor_file);
 
             // Cosine Similarity
-            //ndarray_cosine_sim(&mut criterion, dataset, &embeds_vec);
+            ndarray_cosine_sim(&mut criterion, dataset, &embeds_vec);
             //simsimd_cosine_sim(&mut criterion, dataset, &embeds_vec);
             blas_cosine_sim(&mut criterion, dataset, &embeds_vec);
             blas_cosine_sim_opt(&mut criterion, dataset, &embeds_vec);
