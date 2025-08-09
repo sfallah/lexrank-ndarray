@@ -416,14 +416,19 @@ pub fn blas_cosine_f32_matrix_opt(matrix: &[f32], r: usize, c: usize) -> Vec<f32
     unsafe {
         sgemm(
             Layout::RowMajor,
-            Transpose::None,   // M
-            Transpose::Ordinary,  // Mᵀ
-            r as i32, r as i32, c as i32,
+            Transpose::None,     // M
+            Transpose::Ordinary, // Mᵀ
+            r as i32,
+            r as i32,
+            c as i32,
             1.0,
-            matrix, c as i32,
-            matrix, c as i32,
+            matrix,
+            c as i32,
+            matrix,
+            c as i32,
             0.0,
-            &mut gram, r as i32,
+            &mut gram,
+            r as i32,
         );
     }
 
@@ -444,10 +449,11 @@ pub fn blas_cosine_f32_matrix_opt(matrix: &[f32], r: usize, c: usize) -> Vec<f32
     }
 
     // 4) clamp diagonal to 1 (small num errors)
-    for i in 0..r { gram[i * r + i] = 1.0; }
+    for i in 0..r {
+        gram[i * r + i] = 1.0;
+    }
     gram
 }
-
 
 pub fn blas_softmax_opt(weights: &[f32], m: usize, n: usize) -> Vec<f32> {
     assert_eq!(weights.len(), m * n);
@@ -455,9 +461,8 @@ pub fn blas_softmax_opt(weights: &[f32], m: usize, n: usize) -> Vec<f32> {
 
     // Option A: outer parallelism → set BLAS to single-thread (see §4).
     // rayon::scope(|s| { for r in 0..m { s.spawn(move |_| { ... }) } });
-    for r in 0..m {
+    out.chunks_mut(n).enumerate().for_each(|(r, dst)| {
         let row = &weights[r * n..(r + 1) * n];
-        let dst = &mut out[r * n..(r + 1) * n];
 
         // 1) row max
         let xmax = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
@@ -473,8 +478,7 @@ pub fn blas_softmax_opt(weights: &[f32], m: usize, n: usize) -> Vec<f32> {
         // 3) scale row by 1/sum (BLAS Level-1)
         let inv = 1.0 / sum;
         unsafe { sscal(n as i32, inv, dst, 1) };
-    }
+    });
 
     out
 }
-

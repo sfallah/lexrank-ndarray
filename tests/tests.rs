@@ -1,15 +1,16 @@
 #[cfg(test)]
 pub mod tests {
-    use rayon::prelude::*;
+    use lexrank_ndarray::cblas_impl::{blas_cosine_f32_matrix, blas_lexrank_array, blas_softmax};
     use lexrank_ndarray::testing::{
         f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
     };
-    use lexrank_ndarray::{cos_similarity, lexrank_array, normalize_l2, similarity_matrix, softmax};
+    use lexrank_ndarray::{
+        cos_similarity, lexrank_array, normalize_l2, similarity_matrix, softmax,
+    };
     use ndarray::{array, Array1, Array2, Axis};
     use rayon::prelude::ParallelSliceMut;
-    use lexrank_ndarray::cblas_impl::{blas_cosine_f32_matrix, blas_lexrank_array, blas_softmax};
+    use rayon::prelude::*;
     use simsimd::SpatialSimilarity;
-
 
     #[test]
     fn ndarray_rnd_cosine_sim() -> anyhow::Result<()> {

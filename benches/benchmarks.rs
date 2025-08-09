@@ -1,5 +1,8 @@
 use criterion::{criterion_main, Criterion};
-use lexrank_ndarray::cblas_impl::{blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_lexrank_array, blas_softmax, blas_softmax_opt};
+use lexrank_ndarray::cblas_impl::{
+    blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_lexrank_array, blas_softmax,
+    blas_softmax_opt,
+};
 use lexrank_ndarray::testing::{
     array2_from_vec, load_split_tensor, load_split_vec, load_splits_data,
 };

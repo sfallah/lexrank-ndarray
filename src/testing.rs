@@ -76,11 +76,7 @@ pub fn get_rand_arr2_f32(
     Ok(rnd_arr)
 }
 
-pub fn get_rand_arr1_f32(
-    m: usize,
-    mean: f32,
-    std_dev: f32,
-) -> anyhow::Result<Array1<f32>> {
+pub fn get_rand_arr1_f32(m: usize, mean: f32, std_dev: f32) -> anyhow::Result<Array1<f32>> {
     let rnd_arr = Array::random(m, Normal::new(mean, std_dev)?).into();
     Ok(rnd_arr)
 }

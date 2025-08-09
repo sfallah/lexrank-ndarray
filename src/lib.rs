@@ -1,10 +1,9 @@
-
 use ndarray::{Array, Array1, Array2, Axis, Ix0};
 use rayon::prelude::*;
 
+pub mod cblas_impl;
 #[cfg(feature = "testing")]
 pub mod testing;
-pub mod cblas_impl;
 
 #[cfg(feature = "accelerate")]
 extern crate accelerate_src;
@@ -12,12 +11,11 @@ extern crate cblas;
 #[cfg(feature = "blas")]
 extern crate openblas_src;
 
-
 use simsimd::SpatialSimilarity;
 
+use crate::cblas_impl::blas_cosine_f32_matrix;
 use anyhow::Result;
 use std::ops::{MulAssign, Sub};
-use crate::cblas_impl::blas_cosine_f32_matrix;
 
 pub fn norm(tensor: &Array1<f32>) -> anyhow::Result<Array<f32, Ix0>> {
     Ok(tensor.pow2().sum_axis(Axis(0)).sqrt())
@@ -179,7 +177,13 @@ pub fn lexrank(
         return Ok(vec![]);
     }
     let embeddings_flatten: Vec<f32> = embeddings.iter().flatten().cloned().collect();
-    lexrank_array(&embeddings_flatten, embeddings.len(), embeddings[0].len(), threshold, max_iter)
+    lexrank_array(
+        &embeddings_flatten,
+        embeddings.len(),
+        embeddings[0].len(),
+        threshold,
+        max_iter,
+    )
 }
 
 pub fn lexrank_array(
@@ -192,15 +196,8 @@ pub fn lexrank_array(
     if embeddings.is_empty() {
         return Ok(vec![]);
     }
-    let sim_flat = blas_cosine_f32_matrix(
-        &embeddings,
-        no_seq,
-        embed_dim,
-    );
-    let sim_matrix = Array2::from_shape_vec(
-        (no_seq, no_seq),
-        sim_flat,
-    )?;
+    let sim_flat = blas_cosine_f32_matrix(&embeddings, no_seq, embed_dim);
+    let sim_matrix = Array2::from_shape_vec((no_seq, no_seq), sim_flat)?;
     let threshold = threshold.map(|threshold| {
         let sim_min: f32 = sim_matrix.flatten().into_iter().reduce(f32::min).unwrap();
         //println!("sim_min: {:8.16}", sim_min);
@@ -209,14 +206,10 @@ pub fn lexrank_array(
     });
     let scores = degree_centrality_scores(&sim_matrix, false, threshold, max_iter, true)?;
     let scores_vec: Vec<f32> = scores.flatten().to_vec();
-    let mut ranked_sentences: Vec<_> = (0..no_seq as usize)
-        .zip(scores_vec)
-        .collect();
+    let mut ranked_sentences: Vec<_> = (0..no_seq as usize).zip(scores_vec).collect();
     ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     Ok(ranked_sentences)
 }
-
-
 
 pub fn ss_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     assert_eq!(matrix.len(), r * c);

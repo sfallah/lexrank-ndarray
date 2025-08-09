@@ -39,3 +39,14 @@ required-features = ["testing"]
 [[bench]]
 name = "benchmarks"
 harness = false
+
+# Cargo.toml
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "thin"          # or "fat" if you want maximum inlining at the cost of link time
+debug = false
+incremental = false
+
+[profile.bench]
+inherits = "release"  # if your Cargo is recent; otherwise repeat the keys
