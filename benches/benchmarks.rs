@@ -202,10 +202,10 @@ pub fn benches() {
         .configure_from_args();
 
     let data_set_map = [
-        //(
-        //    "MiniLM-L6-v2",
-        //    "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2/",
-        //),
+        (
+            "MiniLM-L6-v2",
+            "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2/",
+        ),
         (
             "gte-Qwen2-1.5B-instruct",
             "tests/test_data/superlinear_embeddings/gte-Qwen2-1.5B-instruct/",
@@ -228,7 +228,7 @@ pub fn benches() {
                 .unwrap()
                 .0[0];
             let cols = embeds_vec[0].0[1]; // Dimension of the embeddings
-            
+
             println!(
                 "Generate rand_embeds for Dataset: {}, Rows: {}, Cols: {}",
                 dataset, rows, cols
