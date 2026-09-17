@@ -1,8 +1,11 @@
 #[cfg(test)]
 pub mod tests {
-    use lexrank_ndarray::cblas_impl::{blas_cosine_f32_matrix, blas_lexrank_array, blas_softmax};
+    use lexrank_ndarray::cblas_impl::{
+        blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_lexrank_array, blas_softmax,
+    };
     use lexrank_ndarray::testing::{
-        f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor, load_splits_data,
+        array2_from_vec, f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor,
+        load_split_vec, load_splits_data,
     };
     use lexrank_ndarray::{
         cos_similarity, lexrank_array, normalize_l2, similarity_matrix, softmax,
@@ -220,6 +223,104 @@ pub mod tests {
         let simsimd_array = Array2::from_shape_vec((rows, rows), simsimd_result).unwrap();
         println!("{:8.16}", simsimd_array);
     }
+    const PARITY_DATASETS: [&str; 4] = [
+        "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2",
+        "tests/test_data/superlinear_embeddings/bge-reranker-v2",
+        "tests/test_data/superlinear_embeddings/gte-Qwen2-1.5B-instruct",
+        "tests/test_data/superlinear_embeddings/snowflake-arctic-embed-m-v1.5",
+    ];
+
+    /// Cosine similarities computed with f32 in different summation orders.
+    const SIM_TOL: f32 = 1e-5;
+    /// LexRank scores are about 1/n; the power method stops once an iteration moves the
+    /// (un-normalised) eigenvector by less than 1e-5, so the two pipelines may stop one step apart.
+    const SCORE_TOL: f32 = 1e-5;
+
+    /// Every fixture split's similarity matrix is the same through ndarray, per-pair `sdot`
+    /// and the `sgemm` Gram matrix.
+    #[test]
+    fn parity_similarity_matrix() -> anyhow::Result<()> {
+        let (mut max_diff, mut max_diff_opt, mut splits) = (0f32, 0f32, 0);
+        for data_path in PARITY_DATASETS {
+            for split in load_splits_data(data_path)? {
+                let (shape, embeddings) = load_split_vec(data_path, &split)?;
+                let (rows, cols) = (shape[0], shape[1]);
+                let nd = similarity_matrix(&mut array2_from_vec(&embeddings, &shape)?);
+                let blas = blas_cosine_f32_matrix(&embeddings, rows, cols);
+                let opt = blas_cosine_f32_matrix_opt(&embeddings, rows, cols);
+                for i in 0..rows {
+                    for j in 0..rows {
+                        let expected = nd[[i, j]];
+                        let d = (blas[i * rows + j] - expected).abs();
+                        let d_opt = (opt[i * rows + j] - expected).abs();
+                        assert!(
+                            d <= SIM_TOL && d_opt <= SIM_TOL,
+                            "{data_path} split {}: sim[{i}][{j}] ndarray {expected} sdot {} sgemm {}",
+                            split.split_id,
+                            blas[i * rows + j],
+                            opt[i * rows + j]
+                        );
+                        max_diff = max_diff.max(d);
+                        max_diff_opt = max_diff_opt.max(d_opt);
+                    }
+                }
+                splits += 1;
+            }
+        }
+        println!("{splits} splits, max |diff| sdot {max_diff:e}, sgemm {max_diff_opt:e}");
+        Ok(())
+    }
+
+    /// `blas_lexrank_array` gives every sentence the score `lexrank_array` gives it, on every
+    /// fixture split, with and without a threshold (continuous and discrete Markov matrix).
+    #[test]
+    fn parity_lexrank_scores() -> anyhow::Result<()> {
+        let (mut max_diff, mut rankings) = (0f32, 0);
+        for data_path in PARITY_DATASETS {
+            for split in load_splits_data(data_path)? {
+                let (shape, embeddings) = load_split_vec(data_path, &split)?;
+                let (rows, cols) = (shape[0], shape[1]);
+                // Not 0.1: all-MiniLM-L6-v2 split 0 has a minimum similarity of -0.122, which
+                // rescales 0.1 below zero and trips lexrank_array's threshold assert.
+                for threshold in [None, Some(0.3), Some(0.5)] {
+                    let nd = lexrank_array(&embeddings, rows, cols, threshold, 10000)?;
+                    let blas = blas_lexrank_array(&embeddings, rows, cols, threshold, 10000)?;
+                    assert_eq!(nd.len(), rows);
+                    assert_eq!(blas.len(), rows);
+
+                    let mut nd_score = vec![f32::NAN; rows];
+                    for &(idx, score) in &nd {
+                        nd_score[idx] = score;
+                    }
+                    for &(idx, score) in &blas {
+                        let d = (score - nd_score[idx]).abs();
+                        assert!(
+                            d <= SCORE_TOL,
+                            "{data_path} split {} threshold {threshold:?}: sentence {idx} ndarray {} blas {score}",
+                            split.split_id,
+                            nd_score[idx]
+                        );
+                        max_diff = max_diff.max(d);
+                    }
+
+                    // Downstream keeps the top two; they may only differ where scores tie.
+                    for k in 0..rows.min(2) {
+                        assert!(
+                            nd[k].0 == blas[k].0 || (nd[k].1 - blas[k].1).abs() <= SCORE_TOL,
+                            "{data_path} split {} threshold {threshold:?}: rank {k} ndarray {:?} blas {:?}",
+                            split.split_id,
+                            nd[k],
+                            blas[k]
+                        );
+                    }
+                    rankings += 1;
+                }
+            }
+        }
+        println!("{rankings} rankings, max |score diff| {max_diff:e}");
+        Ok(())
+    }
+
     #[test]
     fn test_softmax() -> anyhow::Result<()> {
         let rand_matrix = rand_matrix(4, 4);
