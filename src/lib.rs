@@ -107,6 +107,24 @@ pub fn degree_centrality_scores(
             "'threshold' should be a floating-point number from the interval [0, 1) or None"
         );
     }
+    centrality_scores(
+        similarity_matrix,
+        increase_power,
+        threshold,
+        max_iter,
+        normalized,
+    )
+}
+
+/// `degree_centrality_scores` without the `[0, 1)` check: here `threshold` is an absolute
+/// cosine similarity, which is negative whenever the embeddings have negative similarities.
+fn centrality_scores(
+    similarity_matrix: &Array2<f32>,
+    increase_power: bool,
+    threshold: Option<f32>,
+    max_iter: usize,
+    normalized: bool,
+) -> Result<Array1<f32>> {
     let markov_matrix = if let Some(threshold) = threshold {
         create_markov_matrix_discrete(&similarity_matrix, threshold)?
     } else {
@@ -199,15 +217,25 @@ pub fn lexrank_array(
     if embeddings.is_empty() {
         return Ok(vec![]);
     }
+    if let Some(threshold) = threshold {
+        if !(0.0..1.0).contains(&threshold) {
+            return Err(anyhow::anyhow!(
+                "'threshold' must be in the interval [0, 1) or None, not {}",
+                threshold
+            ));
+        }
+    }
     let mut embeddings = Array2::from_shape_vec((no_seq, embed_dim), embeddings.clone())?;
     let sim_matrix = similarity_matrix(&mut embeddings);
+    // `threshold` is relative: 0 is the least similar pair, 1 is identical. The absolute
+    // cut-off lies in [sim_min, 1) and is negative when the embeddings have negative
+    // similarities, so it must not go through degree_centrality_scores' [0, 1) check.
     let threshold = threshold.map(|threshold| {
         let sim_min: f32 = sim_matrix.flatten().into_iter().reduce(f32::min).unwrap();
-        //println!("sim_min: {:8.16}", sim_min);
         let sim_range = 1f32 - sim_min;
         sim_min + threshold * sim_range
     });
-    let scores = degree_centrality_scores(&sim_matrix, false, threshold, max_iter, true)?;
+    let scores = centrality_scores(&sim_matrix, false, threshold, max_iter, true)?;
     let scores_vec: Vec<f32> = scores.flatten().to_vec();
     let mut ranked_sentences: Vec<_> = (0..no_seq as usize).zip(scores_vec).collect();
     ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());

@@ -280,9 +280,7 @@ pub mod tests {
             for split in load_splits_data(data_path)? {
                 let (shape, embeddings) = load_split_vec(data_path, &split)?;
                 let (rows, cols) = (shape[0], shape[1]);
-                // Not 0.1: all-MiniLM-L6-v2 split 0 has a minimum similarity of -0.122, which
-                // rescales 0.1 below zero and trips lexrank_array's threshold assert.
-                for threshold in [None, Some(0.3), Some(0.5)] {
+                for threshold in [None, Some(0.1), Some(0.3), Some(0.5)] {
                     let nd = lexrank_array(&embeddings, rows, cols, threshold, 10000)?;
                     let blas = blas_lexrank_array(&embeddings, rows, cols, threshold, 10000)?;
                     assert_eq!(nd.len(), rows);
@@ -318,6 +316,48 @@ pub mod tests {
             }
         }
         println!("{rankings} rankings, max |score diff| {max_diff:e}");
+        Ok(())
+    }
+
+    /// all-MiniLM-L6-v2 split 0 has negative cosine similarities, so a small relative threshold
+    /// rescales to a negative absolute cut-off. That used to panic in `lexrank_array` and fail
+    /// in `blas_lexrank_array`.
+    #[test]
+    fn threshold_with_negative_similarities() -> anyhow::Result<()> {
+        let data_path = "tests/test_data/superlinear_embeddings/all-MiniLM-L6-v2";
+        let splits = load_splits_data(data_path)?;
+        let (shape, embeddings) = load_split_vec(data_path, &splits[0])?;
+        let (rows, cols) = (shape[0], shape[1]);
+
+        let sim = similarity_matrix(&mut array2_from_vec(&embeddings, &shape)?);
+        let sim_min = sim.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!(
+            sim_min < -0.1,
+            "fixture no longer has negative similarities: {sim_min}"
+        );
+
+        for threshold in [0.0, 0.05, 0.1] {
+            let nd = lexrank_array(&embeddings, rows, cols, Some(threshold), 10000)?;
+            let blas = blas_lexrank_array(&embeddings, rows, cols, Some(threshold), 10000)?;
+            assert_eq!(nd.len(), rows);
+            assert_eq!(blas.len(), rows);
+            assert!(nd.iter().chain(&blas).all(|(_, score)| score.is_finite()));
+        }
+        Ok(())
+    }
+
+    /// A threshold outside [0, 1) is rejected with an error by both pipelines, not a panic.
+    #[test]
+    fn threshold_outside_unit_interval_is_an_error() -> anyhow::Result<()> {
+        let data_path = "tests/test_data/superlinear_embeddings/gte-Qwen2-1.5B-instruct";
+        let splits = load_splits_data(data_path)?;
+        let (shape, embeddings) = load_split_vec(data_path, &splits[0])?;
+        let (rows, cols) = (shape[0], shape[1]);
+
+        for threshold in [-0.1, 1.0, 1.5, f32::NAN] {
+            assert!(lexrank_array(&embeddings, rows, cols, Some(threshold), 10000).is_err());
+            assert!(blas_lexrank_array(&embeddings, rows, cols, Some(threshold), 10000).is_err());
+        }
         Ok(())
     }
 

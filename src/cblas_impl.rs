@@ -349,6 +349,26 @@ pub fn blas_degree_centrality_scores(
         }
     }
 
+    Ok(blas_centrality_scores(
+        sim,
+        n,
+        increase_power,
+        threshold,
+        max_iter,
+        normalized,
+    ))
+}
+
+/// `blas_degree_centrality_scores` without the `[0, 1)` check: here `threshold` is an absolute
+/// cosine similarity, which is negative whenever the embeddings have negative similarities.
+fn blas_centrality_scores(
+    sim: &[f32],
+    n: usize,
+    increase_power: bool,
+    threshold: Option<f32>,
+    max_iter: usize,
+    normalized: bool,
+) -> Vec<f32> {
     // ---- 2) Build the (row-stochastic) Markov matrix ------------------------
     let markov = if let Some(t) = threshold {
         blas_create_markov_matrix_discrete(sim, n, n, t)
@@ -357,9 +377,7 @@ pub fn blas_degree_centrality_scores(
     };
 
     // ---- 3) Stationary distribution (dominant left eigenvector) ------------
-    let scores = blas_stationary_distribution(&markov, n, increase_power, max_iter, normalized);
-
-    Ok(scores)
+    blas_stationary_distribution(&markov, n, increase_power, max_iter, normalized)
 }
 
 /// LexRank scores for a batch of sentence (or token) embeddings.
@@ -382,12 +400,23 @@ pub fn blas_lexrank_array(
     if embeddings.is_empty() {
         return Ok(vec![]);
     }
+    if let Some(t) = threshold {
+        if !(0.0..1.0).contains(&t) {
+            bail!(
+                "'threshold' must be in the interval [0, 1) or None, not {}",
+                t
+            );
+        }
+    }
 
     // ------------------------------------------------------------------ 1) similarity matrix
     // Row-major, length = no_seq²
     let sim_flat = blas_cosine_f32_matrix(embeddings, no_seq, embed_dim);
 
     // ------------------------------------------------------------------ 2) adapt threshold to similarity range
+    // `t` is relative (0 = least similar pair, 1 = identical); the absolute cut-off lies in
+    // [sim_min, 1) and is negative when the embeddings have negative similarities, so it must
+    // not go through blas_degree_centrality_scores' [0, 1) check.
     let thresh_adj = threshold.map(|t| {
         let sim_min = sim_flat.iter().copied().fold(f32::INFINITY, f32::min);
         let sim_range = 1.0 - sim_min; // max possible – min
@@ -395,11 +424,11 @@ pub fn blas_lexrank_array(
     });
 
     // ------------------------------------------------------------------ 3) degree-centrality (LexRank) scores
-    let scores = blas_degree_centrality_scores(
+    let scores = blas_centrality_scores(
         &sim_flat, // similarity matrix (flat)
         no_seq,    // n × n
         /*increase_power=*/ false, thresh_adj, max_iter, /*normalized=*/ true,
-    )?;
+    );
 
     // ------------------------------------------------------------------ 4) zip with indices and sort descending
     let mut ranked: Vec<(usize, f32)> = scores
