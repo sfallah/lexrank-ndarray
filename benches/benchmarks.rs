@@ -14,8 +14,9 @@
 //! All inputs are built before timing, and outputs are dropped after it (`iter_batched`), so the
 //! ndarray and CBLAS variants are timed on the same terms. The one copy that is timed on purpose
 //! is the input clone `lexrank_array` makes internally; `input-clone` measures it on its own.
+//! Everything runs on a rayon worker thread, as it does downstream (see `main`).
 
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, SamplingMode};
+use criterion::{criterion_group, BatchSize, BenchmarkId, Criterion, SamplingMode};
 use lexrank_ndarray::cblas_impl::{
     blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_degree_centrality_scores,
     blas_lexrank_array,
@@ -375,4 +376,19 @@ criterion_group! {
         .sample_size(30);
     targets = kernel_benches, scaling_benches, throughput_benches
 }
-criterion_main!(benches);
+
+/// `criterion_main!`, but run on a rayon worker thread. `blas_cosine_f32_matrix` uses rayon
+/// internally; called from a thread outside the pool, every call hands its work to a pool thread
+/// and sleeps until it is done, even with one rayon thread, which adds wake-up latency and jitter
+/// to exactly the CBLAS variants. embedding-processing calls LexRank from inside rayon workers,
+/// where that handoff does not happen. The pool honours `RAYON_NUM_THREADS`.
+fn main() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .stack_size(16 << 20)
+        .build()
+        .unwrap();
+    pool.install(|| {
+        benches();
+        Criterion::default().configure_from_args().final_summary();
+    });
+}
