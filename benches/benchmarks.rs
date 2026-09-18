@@ -4,19 +4,20 @@
 //! each group). Every benchmark id carries the BLAS backend the binary was built with, so results
 //! from several builds can be merged without losing track of which is which.
 //!
-//! - `kernel/<backend>/<dataset>/...`: the cost of the individual steps and of the full pipeline,
-//!   one call at a time on one thread, summed over every split of one fixture dataset.
+//! - `kernel/<backend>/<dataset>/...`: the individual steps and the full pipeline on one thread,
+//!   one split per call, cycling through every split of one fixture dataset. Times are per split.
 //! - `scaling/<backend>/d768/...`: the same functions on synthetic sentence counts, to see where
 //!   the backends and BLAS threading start to matter.
 //! - `throughput/<backend>/threads4/...`: all fixture splits in parallel on a fixed 4-thread rayon
 //!   pool, the way embedding-processing calls LexRank.
 //!
-//! All inputs are built before timing, and outputs are dropped after it (`iter_batched`), so the
-//! ndarray and CBLAS variants are timed on the same terms. The one copy that is timed on purpose
-//! is the input clone `lexrank_array` makes internally; `input-clone` measures it on its own.
-//! Everything runs on a rayon worker thread, as it does downstream (see `main`).
+//! In `kernel` and `scaling` every variant gets its input copied right before its timed call, so
+//! it starts in cache, as when the pipeline copies its input or downstream hands over a freshly
+//! produced embedding block. Input and output are both dropped after timing. The one copy that is
+//! timed on purpose is the clone `lexrank_array` makes internally; `input-clone` measures it on
+//! its own. Everything runs on a rayon worker thread, as it does downstream (see `main`).
 
-use criterion::{criterion_group, BatchSize, BenchmarkId, Criterion, SamplingMode};
+use criterion::{criterion_group, BatchSize, Bencher, BenchmarkId, Criterion, SamplingMode};
 use lexrank_ndarray::cblas_impl::{
     blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_degree_centrality_scores,
     blas_lexrank_array,
@@ -111,9 +112,35 @@ fn synthetic_split(rows: usize, cols: usize, seed: u64) -> Split {
     Split::new(rows, cols, flat)
 }
 
+/// A benchmark that times `routine` on one split per iteration, cycling through `splits`.
+///
+/// `setup` builds the iteration's input right before it is timed, so every variant starts from
+/// data that is in cache. `routine` returns what it was given along with its result, so neither
+/// the input nor the output is freed inside the timed region.
+fn per_split<'a, I, O>(
+    splits: &'a [Split],
+    mut setup: impl FnMut(usize) -> I + 'a,
+    mut routine: impl FnMut(I, &Split) -> O + 'a,
+) -> impl FnMut(&mut Bencher<'_>) + 'a {
+    move |b| {
+        let mut next = 0;
+        b.iter_batched(
+            || {
+                let k = next % splits.len();
+                next += 1;
+                (setup(k), k)
+            },
+            |(input, k)| routine(black_box(input), &splits[k]),
+            BatchSize::PerIteration,
+        )
+    }
+}
+
 /// Run with one thread everywhere: `RAYON_NUM_THREADS=1` and the BLAS thread variable set to 1
 /// (`OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `OMP_NUM_THREADS`, `VECLIB_MAXIMUM_THREADS`).
-/// Each iteration processes every split of the dataset once, sequentially.
+/// The parts add up to the whole: `lexrank-ndarray_api` is `input-clone` + `similarity-ndarray`
+/// + `centrality-ndarray`, and `lexrank-cblas` is `similarity-cblas_sdot` + `centrality-cblas`,
+/// each plus a final sort.
 fn kernel_benches(c: &mut Criterion) {
     for (dataset, path) in DATASETS {
         let splits = load_dataset(path);
@@ -125,125 +152,78 @@ fn kernel_benches(c: &mut Criterion) {
             .iter()
             .map(|s| blas_cosine_f32_matrix(&s.flat, s.rows, s.cols))
             .collect();
+        let flat = |k: usize| splits[k].flat.clone();
 
         let mut group = c.benchmark_group(format!("kernel/{BACKEND}/{dataset}"));
-
-        group.bench_function("similarity-ndarray", |b| {
-            b.iter_batched(
-                || splits.iter().map(|s| s.array.clone()).collect::<Vec<_>>(),
-                |mut arrays| {
-                    arrays
-                        .iter_mut()
-                        .map(|a| similarity_matrix(black_box(a)))
-                        .collect::<Vec<_>>()
+        group.bench_function(
+            "similarity-ndarray",
+            per_split(
+                &splits,
+                |k| splits[k].array.clone(),
+                |mut a, _| {
+                    let sim = similarity_matrix(&mut a);
+                    (a, sim)
                 },
-                BatchSize::SmallInput,
-            )
-        });
-        group.bench_function("similarity-cblas_sdot", |b| {
-            b.iter_batched(
-                || (),
-                |_| {
-                    splits
-                        .iter()
-                        .map(|s| blas_cosine_f32_matrix(black_box(&s.flat), s.rows, s.cols))
-                        .collect::<Vec<_>>()
+            ),
+        );
+        group.bench_function(
+            "similarity-cblas_sdot",
+            per_split(&splits, flat, |v, s| {
+                let sim = blas_cosine_f32_matrix(&v, s.rows, s.cols);
+                (v, sim)
+            }),
+        );
+        group.bench_function(
+            "similarity-cblas_sgemm",
+            per_split(&splits, flat, |v, s| {
+                let sim = blas_cosine_f32_matrix_opt(&v, s.rows, s.cols);
+                (v, sim)
+            }),
+        );
+        group.bench_function(
+            "centrality-ndarray",
+            per_split(
+                &splits,
+                |k| nd_sims[k].clone(),
+                |sim, _| {
+                    let scores = degree_centrality_scores(&sim, false, None, MAX_ITER, true);
+                    (sim, scores.unwrap())
                 },
-                BatchSize::SmallInput,
-            )
-        });
-        group.bench_function("similarity-cblas_sgemm", |b| {
-            b.iter_batched(
-                || (),
-                |_| {
-                    splits
-                        .iter()
-                        .map(|s| blas_cosine_f32_matrix_opt(black_box(&s.flat), s.rows, s.cols))
-                        .collect::<Vec<_>>()
+            ),
+        );
+        group.bench_function(
+            "centrality-cblas",
+            per_split(
+                &splits,
+                |k| blas_sims[k].clone(),
+                |sim, s| {
+                    let scores =
+                        blas_degree_centrality_scores(&sim, s.rows, false, None, MAX_ITER, true);
+                    (sim, scores.unwrap())
                 },
-                BatchSize::SmallInput,
-            )
-        });
-        group.bench_function("centrality-ndarray", |b| {
-            b.iter_batched(
-                || (),
-                |_| {
-                    nd_sims
-                        .iter()
-                        .map(|sim| {
-                            degree_centrality_scores(black_box(sim), false, None, MAX_ITER, true)
-                                .unwrap()
-                        })
-                        .collect::<Vec<_>>()
-                },
-                BatchSize::SmallInput,
-            )
-        });
-        group.bench_function("centrality-cblas", |b| {
-            b.iter_batched(
-                || (),
-                |_| {
-                    blas_sims
-                        .iter()
-                        .zip(&splits)
-                        .map(|(sim, s)| {
-                            blas_degree_centrality_scores(
-                                black_box(sim),
-                                s.rows,
-                                false,
-                                None,
-                                MAX_ITER,
-                                true,
-                            )
-                            .unwrap()
-                        })
-                        .collect::<Vec<_>>()
-                },
-                BatchSize::SmallInput,
-            )
-        });
-        group.bench_function("lexrank-ndarray_api", |b| {
-            b.iter_batched(
-                || (),
-                |_| {
-                    splits
-                        .iter()
-                        .map(|s| {
-                            lexrank_array(black_box(&s.flat), s.rows, s.cols, None, MAX_ITER)
-                                .unwrap()
-                        })
-                        .collect::<Vec<_>>()
-                },
-                BatchSize::SmallInput,
-            )
-        });
-        group.bench_function("lexrank-cblas", |b| {
-            b.iter_batched(
-                || (),
-                |_| {
-                    splits
-                        .iter()
-                        .map(|s| {
-                            blas_lexrank_array(black_box(&s.flat), s.rows, s.cols, None, MAX_ITER)
-                                .unwrap()
-                        })
-                        .collect::<Vec<_>>()
-                },
-                BatchSize::SmallInput,
-            )
-        });
-        group.bench_function("input-clone", |b| {
-            b.iter_batched(
-                || (),
-                |_| {
-                    splits
-                        .iter()
-                        .map(|s| black_box(&s.flat).clone())
-                        .collect::<Vec<_>>()
-                },
-                BatchSize::SmallInput,
-            )
-        });
+            ),
+        );
+        group.bench_function(
+            "lexrank-ndarray_api",
+            per_split(&splits, flat, |v, s| {
+                let ranked = lexrank_array(&v, s.rows, s.cols, None, MAX_ITER);
+                (v, ranked.unwrap())
+            }),
+        );
+        group.bench_function(
+            "lexrank-cblas",
+            per_split(&splits, flat, |v, s| {
+                let ranked = blas_lexrank_array(&v, s.rows, s.cols, None, MAX_ITER);
+                (v, ranked.unwrap())
+            }),
+        );
+        group.bench_function(
+            "input-clone",
+            per_split(&splits, flat, |v, _| {
+                let copy = v.clone();
+                (v, copy)
+            }),
+        );
         group.finish();
     }
 }
@@ -259,59 +239,48 @@ fn scaling_benches(c: &mut Criterion) {
         .measurement_time(Duration::from_secs(3));
 
     for rows in [16, 64, 256, 512] {
-        let split = synthetic_split(rows, DIM, rows as u64);
+        let splits = [synthetic_split(rows, DIM, rows as u64)];
+        let flat = |k: usize| splits[k].flat.clone();
 
-        group.bench_with_input(
+        group.bench_function(
             BenchmarkId::new("similarity-ndarray", rows),
-            &split,
-            |b, s| {
-                b.iter_batched(
-                    || s.array.clone(),
-                    |mut a| similarity_matrix(black_box(&mut a)),
-                    BatchSize::LargeInput,
-                )
-            },
+            per_split(
+                &splits,
+                |k| splits[k].array.clone(),
+                |mut a, _| {
+                    let sim = similarity_matrix(&mut a);
+                    (a, sim)
+                },
+            ),
         );
-        group.bench_with_input(
+        group.bench_function(
             BenchmarkId::new("similarity-cblas_sdot", rows),
-            &split,
-            |b, s| {
-                b.iter_batched(
-                    || (),
-                    |_| blas_cosine_f32_matrix(black_box(&s.flat), s.rows, s.cols),
-                    BatchSize::LargeInput,
-                )
-            },
+            per_split(&splits, flat, |v, s| {
+                let sim = blas_cosine_f32_matrix(&v, s.rows, s.cols);
+                (v, sim)
+            }),
         );
-        group.bench_with_input(
+        group.bench_function(
             BenchmarkId::new("similarity-cblas_sgemm", rows),
-            &split,
-            |b, s| {
-                b.iter_batched(
-                    || (),
-                    |_| blas_cosine_f32_matrix_opt(black_box(&s.flat), s.rows, s.cols),
-                    BatchSize::LargeInput,
-                )
-            },
+            per_split(&splits, flat, |v, s| {
+                let sim = blas_cosine_f32_matrix_opt(&v, s.rows, s.cols);
+                (v, sim)
+            }),
         );
-        group.bench_with_input(
+        group.bench_function(
             BenchmarkId::new("lexrank-ndarray_api", rows),
-            &split,
-            |b, s| {
-                b.iter_batched(
-                    || (),
-                    |_| lexrank_array(black_box(&s.flat), s.rows, s.cols, None, MAX_ITER).unwrap(),
-                    BatchSize::LargeInput,
-                )
-            },
+            per_split(&splits, flat, |v, s| {
+                let ranked = lexrank_array(&v, s.rows, s.cols, None, MAX_ITER);
+                (v, ranked.unwrap())
+            }),
         );
-        group.bench_with_input(BenchmarkId::new("lexrank-cblas", rows), &split, |b, s| {
-            b.iter_batched(
-                || (),
-                |_| blas_lexrank_array(black_box(&s.flat), s.rows, s.cols, None, MAX_ITER).unwrap(),
-                BatchSize::LargeInput,
-            )
-        });
+        group.bench_function(
+            BenchmarkId::new("lexrank-cblas", rows),
+            per_split(&splits, flat, |v, s| {
+                let ranked = blas_lexrank_array(&v, s.rows, s.cols, None, MAX_ITER);
+                (v, ranked.unwrap())
+            }),
+        );
     }
     group.finish();
 }
