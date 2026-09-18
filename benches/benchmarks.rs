@@ -17,13 +17,14 @@
 //! timed on purpose is the clone `lexrank_array` makes internally; `input-clone` measures it on
 //! its own. Everything runs on a rayon worker thread, as it does downstream (see `main`).
 
+use cblas::{sgemm, ssyrk, Layout, Part, Transpose};
 use criterion::{criterion_group, BatchSize, Bencher, BenchmarkId, Criterion, SamplingMode};
 use lexrank_ndarray::cblas_impl::{
     blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_degree_centrality_scores,
     blas_lexrank_array,
 };
 use lexrank_ndarray::testing::{array2_from_vec, load_split_vec, load_splits_data};
-use lexrank_ndarray::{degree_centrality_scores, lexrank_array, similarity_matrix};
+use lexrank_ndarray::{degree_centrality_scores, lexrank_array, normalize_l2, similarity_matrix};
 use ndarray::Array2;
 use rayon::prelude::*;
 use std::hint::black_box;
@@ -285,6 +286,193 @@ fn scaling_benches(c: &mut Criterion) {
     group.finish();
 }
 
+/// The full Gram matrix `E·Eᵀ` through one `sgemm`, without normalisation.
+fn gram_sgemm(e: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let (n, k) = (rows as i32, cols as i32);
+    let mut gram = vec![0.0f32; rows * rows];
+    unsafe {
+        sgemm(
+            Layout::RowMajor,
+            Transpose::None,
+            Transpose::Ordinary,
+            n,
+            n,
+            k,
+            1.0,
+            e,
+            k,
+            e,
+            k,
+            0.0,
+            &mut gram,
+            n,
+        )
+    };
+    gram
+}
+
+/// The upper triangle of the Gram matrix `E·Eᵀ` through one `ssyrk`, without normalisation.
+fn gram_ssyrk(e: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let (n, k) = (rows as i32, cols as i32);
+    let mut gram = vec![0.0f32; rows * rows];
+    unsafe {
+        ssyrk(
+            Layout::RowMajor,
+            Part::Upper,
+            Transpose::None,
+            n,
+            k,
+            1.0,
+            e,
+            k,
+            0.0,
+            &mut gram,
+            n,
+        )
+    };
+    gram
+}
+
+/// Cosine similarity through one `ssyrk`: the upper triangle of `E·Eᵀ`, scaled by the norms read
+/// off its diagonal, then mirrored. Same work as the per-pair `sdot` loop (one triangle), but in
+/// a single BLAS call. Not in the library; benchmarked to see whether it should be.
+fn similarity_ssyrk(e: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    let mut sim = gram_ssyrk(e, rows, cols);
+    let inv_norm: Vec<f32> = (0..rows)
+        .map(|i| 1.0 / sim[i * rows + i].sqrt().max(f32::MIN_POSITIVE))
+        .collect();
+    for i in 0..rows {
+        sim[i * rows + i] = 1.0;
+        for j in (i + 1)..rows {
+            let s = sim[i * rows + j] * inv_norm[i] * inv_norm[j];
+            sim[i * rows + j] = s;
+            sim[j * rows + i] = s;
+        }
+    }
+    sim
+}
+
+/// Split the similarity step into its parts and compare it with one-call alternatives.
+/// Run single-threaded like `kernel_benches` (and optionally again with the BLAS default
+/// threads). Before timing, `similarity_ssyrk` is checked against `similarity_matrix`.
+///
+/// - `normalize-ndarray` + `gram-ndarray_dot` make up `total-ndarray` (`similarity_matrix`).
+/// - `gram-sgemm` is the same full Gram matrix straight through CBLAS, without ndarray.
+/// - `gram-ssyrk` computes only its upper triangle; `total-ssyrk` adds the norm scaling.
+/// - `norms-snrm2` is the first half of `total-cblas_sdot` (`blas_cosine_f32_matrix`).
+fn similarity_benches(c: &mut Criterion) {
+    let mut inputs: Vec<(String, Vec<Split>)> = [DATASETS[0], DATASETS[3]]
+        .iter()
+        .map(|(name, path)| (name.to_string(), load_dataset(path)))
+        .collect();
+    for rows in [16, 32, 64, 128, 256] {
+        let split = synthetic_split(rows, 768, rows as u64);
+        inputs.push((format!("d768-n{rows}"), vec![split]));
+    }
+
+    for (name, splits) in &inputs {
+        for s in splits {
+            let expected = similarity_matrix(&mut s.array.clone());
+            let got = similarity_ssyrk(&s.flat, s.rows, s.cols);
+            let diff = expected
+                .iter()
+                .zip(&got)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            assert!(diff <= 1e-5, "similarity_ssyrk differs by {diff} on {name}");
+        }
+        let normalized: Vec<Array2<f32>> = splits
+            .iter()
+            .map(|s| {
+                let mut a = s.array.clone();
+                normalize_l2(&mut a);
+                a
+            })
+            .collect();
+        let flat = |k: usize| splits[k].flat.clone();
+
+        let mut group = c.benchmark_group(format!("similarity/{BACKEND}/{name}"));
+        if splits.len() == 1 {
+            group
+                .sampling_mode(SamplingMode::Flat)
+                .sample_size(10)
+                .measurement_time(Duration::from_secs(2));
+        }
+        group.bench_function(
+            "normalize-ndarray",
+            per_split(
+                splits,
+                |k| splits[k].array.clone(),
+                |mut a, _| {
+                    normalize_l2(&mut a);
+                    a
+                },
+            ),
+        );
+        group.bench_function(
+            "gram-ndarray_dot",
+            per_split(
+                splits,
+                |k| normalized[k].clone(),
+                |a, _| {
+                    let gram = a.dot(&a.t());
+                    (a, gram)
+                },
+            ),
+        );
+        group.bench_function(
+            "total-ndarray",
+            per_split(
+                splits,
+                |k| splits[k].array.clone(),
+                |mut a, _| {
+                    let sim = similarity_matrix(&mut a);
+                    (a, sim)
+                },
+            ),
+        );
+        group.bench_function(
+            "gram-sgemm",
+            per_split(splits, flat, |v, s| {
+                let gram = gram_sgemm(&v, s.rows, s.cols);
+                (v, gram)
+            }),
+        );
+        group.bench_function(
+            "gram-ssyrk",
+            per_split(splits, flat, |v, s| {
+                let gram = gram_ssyrk(&v, s.rows, s.cols);
+                (v, gram)
+            }),
+        );
+        group.bench_function(
+            "total-ssyrk",
+            per_split(splits, flat, |v, s| {
+                let sim = similarity_ssyrk(&v, s.rows, s.cols);
+                (v, sim)
+            }),
+        );
+        group.bench_function(
+            "norms-snrm2",
+            per_split(splits, flat, |v, s| {
+                let norms: Vec<f32> = v
+                    .chunks_exact(s.cols)
+                    .map(|row| unsafe { cblas::snrm2(s.cols as i32, row, 1) })
+                    .collect();
+                (v, norms)
+            }),
+        );
+        group.bench_function(
+            "total-cblas_sdot",
+            per_split(splits, flat, |v, s| {
+                let sim = blas_cosine_f32_matrix(&v, s.rows, s.cols);
+                (v, sim)
+            }),
+        );
+        group.finish();
+    }
+}
+
 /// Run with the BLAS thread variables set to 1; the rayon pool is fixed at 4 threads here, so
 /// the machines are compared at equal parallelism. `downstream-lexrank_array` reproduces
 /// embedding-processing's call, `lexrank_array(&embeddings.to_vec(), ..)`, copies included.
@@ -343,7 +531,7 @@ criterion_group! {
         .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(2))
         .sample_size(30);
-    targets = kernel_benches, scaling_benches, throughput_benches
+    targets = kernel_benches, scaling_benches, throughput_benches, similarity_benches
 }
 
 /// `criterion_main!`, but run on a rayon worker thread. `blas_cosine_f32_matrix` uses rayon
