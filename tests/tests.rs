@@ -1,7 +1,8 @@
 #[cfg(test)]
 pub mod tests {
     use lexrank_ndarray::cblas_impl::{
-        blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_lexrank_array, blas_softmax,
+        blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_cosine_f32_matrix_syrk,
+        blas_lexrank_array, blas_softmax, SYRK_MIN_ROWS,
     };
     use lexrank_ndarray::testing::{
         array2_from_vec, f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor,
@@ -316,6 +317,76 @@ pub mod tests {
             }
         }
         println!("{rankings} rankings, max |score diff| {max_diff:e}");
+        Ok(())
+    }
+
+    /// The `ssyrk` route gives the same similarity matrix as ndarray, on every fixture split and
+    /// on inputs large enough that `blas_cosine_matrix` picks it.
+    #[test]
+    fn parity_similarity_matrix_syrk() -> anyhow::Result<()> {
+        let mut max_diff = 0f32;
+        for data_path in PARITY_DATASETS {
+            for split in load_splits_data(data_path)? {
+                let (shape, embeddings) = load_split_vec(data_path, &split)?;
+                let (rows, cols) = (shape[0], shape[1]);
+                let nd = similarity_matrix(&mut array2_from_vec(&embeddings, &shape)?);
+                let syrk = blas_cosine_f32_matrix_syrk(&embeddings, rows, cols);
+                for i in 0..rows {
+                    for j in 0..rows {
+                        let d = (syrk[i * rows + j] - nd[[i, j]]).abs();
+                        assert!(
+                            d <= SIM_TOL,
+                            "{data_path} split {}: sim[{i}][{j}] ndarray {} ssyrk {}",
+                            split.split_id,
+                            nd[[i, j]],
+                            syrk[i * rows + j]
+                        );
+                        max_diff = max_diff.max(d);
+                    }
+                }
+            }
+        }
+        for rows in [SYRK_MIN_ROWS, 2 * SYRK_MIN_ROWS] {
+            let cols = 768;
+            let mut embeddings = get_rand_arr2_f32(rows, cols, 0.0, 1.0)?;
+            let flat: Vec<f32> = embeddings.flatten().to_vec();
+            let nd = similarity_matrix(&mut embeddings);
+            let syrk = blas_cosine_f32_matrix_syrk(&flat, rows, cols);
+            for i in 0..rows {
+                for j in 0..rows {
+                    let d = (syrk[i * rows + j] - nd[[i, j]]).abs();
+                    assert!(d <= SIM_TOL, "{rows}x{cols}: sim[{i}][{j}] differs by {d}");
+                    max_diff = max_diff.max(d);
+                }
+            }
+        }
+        println!("max |diff| ndarray vs ssyrk {max_diff:e}");
+        Ok(())
+    }
+
+    /// Splits at or above `SYRK_MIN_ROWS` take the `ssyrk` route inside `blas_lexrank_array`;
+    /// the scores must still match `lexrank_array`.
+    #[test]
+    fn parity_lexrank_scores_above_syrk_threshold() -> anyhow::Result<()> {
+        let cols = 768;
+        for rows in [SYRK_MIN_ROWS, 2 * SYRK_MIN_ROWS + 5] {
+            let embeddings: Vec<f32> = get_rand_arr2_f32(rows, cols, 0.0, 1.0)?.flatten().to_vec();
+            for threshold in [None, Some(0.3)] {
+                let nd = lexrank_array(&embeddings, rows, cols, threshold, 10000)?;
+                let blas = blas_lexrank_array(&embeddings, rows, cols, threshold, 10000)?;
+                let mut nd_score = vec![f32::NAN; rows];
+                for &(idx, score) in &nd {
+                    nd_score[idx] = score;
+                }
+                for &(idx, score) in &blas {
+                    assert!(
+                        (score - nd_score[idx]).abs() <= SCORE_TOL,
+                        "{rows} sentences, threshold {threshold:?}: sentence {idx} ndarray {} blas {score}",
+                        nd_score[idx]
+                    );
+                }
+            }
+        }
         Ok(())
     }
 

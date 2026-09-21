@@ -4,13 +4,13 @@ use rayon::prelude::*;
 
 #[cfg(feature = "accelerate")]
 extern crate accelerate_src;
-extern crate cblas;
-#[cfg(feature = "blas")]
-extern crate openblas_src;
 #[cfg(feature = "blis")]
 extern crate blis_src;
+extern crate cblas;
 #[cfg(feature = "mkl")]
 extern crate intel_mkl_src;
+#[cfg(feature = "blas")]
+extern crate openblas_src;
 
 /// Apply soft-max row-wise to an `m × n` matrix stored row-major.
 ///
@@ -284,6 +284,74 @@ pub fn blas_norm2_f32(vec: &[f32]) -> f32 {
     unsafe { snrm2(vec.len() as i32, vec, 1) }
 }
 
+/// Above this many sentences, one `ssyrk` call beats the per-pair `sdot` loop.
+///
+/// Both compute one triangle of `E·Eᵀ`, the loop in `r(r-1)/2` short calls and `ssyrk` in one
+/// blocked call. The loop's per-call cost dominates as `r` grows: at 768 dimensions and one
+/// thread the two cross between 16 and 32 rows on every backend measured (the `similarity/`
+/// bench group), and by 256 rows the loop is 3-18x slower. Below the threshold the loop still
+/// wins, most clearly with Accelerate on the tall, skinny matrices LexRank gets from one chunk
+/// (9-23 sentences x 384-1536 dimensions), where its `ssyrk` is about 2x slower than `sgemm`.
+pub const SYRK_MIN_ROWS: usize = 32;
+
+/// The cosine similarity matrix, by whichever route suits the shape: see [`SYRK_MIN_ROWS`].
+pub fn blas_cosine_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
+    if r >= SYRK_MIN_ROWS {
+        blas_cosine_f32_matrix_syrk(matrix, r, c)
+    } else {
+        blas_cosine_f32_matrix(matrix, r, c)
+    }
+}
+
+/// The cosine similarity matrix through one `ssyrk` call.
+///
+/// `ssyrk` fills one triangle of the Gram matrix `E·Eᵀ`, whose diagonal holds `‖row‖²`, so the
+/// norms come out of the same call. The triangle is then scaled by them and mirrored.
+pub fn blas_cosine_f32_matrix_syrk(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
+    assert_eq!(matrix.len(), r * c, "dimension mismatch");
+    let mut sim = vec![0.0f32; r * r];
+    unsafe {
+        ssyrk(
+            Layout::RowMajor,
+            Part::Upper,
+            Transpose::None,
+            r as i32,
+            c as i32,
+            1.0,
+            matrix,
+            c as i32,
+            0.0,
+            &mut sim,
+            r as i32,
+        )
+    };
+
+    let inv_norm: Vec<f32> = (0..r)
+        .map(|i| 1.0 / sim[i * r + i].sqrt().max(f32::MIN_POSITIVE))
+        .collect();
+    for i in 0..r {
+        sim[i * r + i] = 1.0;
+        for j in (i + 1)..r {
+            let s = sim[i * r + j] * inv_norm[i] * inv_norm[j];
+            sim[i * r + j] = s;
+            sim[j * r + i] = s;
+        }
+    }
+    sim
+}
+
+/// `‖x‖₂` as `sqrt(x · x)`.
+///
+/// `snrm2` scales as it accumulates so that it cannot overflow, and some libraries pay a lot for
+/// that: on the DGX Spark, OpenBLAS's ARM `snrm2` took 14.8 µs of the 27.1 µs similarity step at
+/// 1536 dimensions, against 2.5 µs for MKL. Embedding norms are far from `f32`'s limits, so the
+/// plain dot product is safe here and 3-6x faster on that machine.
+#[inline(always)]
+pub fn blas_norm2_sdot_f32(vec: &[f32]) -> f32 {
+    let n = vec.len() as i32;
+    unsafe { sdot(n, vec, 1, vec, 1) }.sqrt()
+}
+
 #[inline(always)]
 pub fn blas_cosine_f32_opt(a: &[f32], b: &[f32], a_norm: f32, b_norm: f32) -> f32 {
     //assert_eq!(a.len(), b.len(), "dimension mismatch");
@@ -301,7 +369,7 @@ pub fn blas_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     norms.iter_mut().enumerate().for_each(|(i, norm)| {
         // -- row i norm --
         let row_i = &matrix[i * c..(i + 1) * c];
-        *norm = blas_norm2_f32(row_i); // compute row i norm
+        *norm = blas_norm2_sdot_f32(row_i); // compute row i norm
     });
 
     // ❷ process each *row slice* of `result` in parallel
@@ -411,7 +479,7 @@ pub fn blas_lexrank_array(
 
     // ------------------------------------------------------------------ 1) similarity matrix
     // Row-major, length = no_seq²
-    let sim_flat = blas_cosine_f32_matrix(embeddings, no_seq, embed_dim);
+    let sim_flat = blas_cosine_matrix(embeddings, no_seq, embed_dim);
 
     // ------------------------------------------------------------------ 2) adapt threshold to similarity range
     // `t` is relative (0 = least similar pair, 1 = identical); the absolute cut-off lies in
