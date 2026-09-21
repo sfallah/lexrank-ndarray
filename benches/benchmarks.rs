@@ -32,10 +32,8 @@ use std::time::Duration;
 
 const BACKEND: &str = if cfg!(feature = "accelerate") {
     "accelerate"
-} else if cfg!(feature = "mkl") {
-    "mkl"
-} else if cfg!(feature = "blis") {
-    "blis"
+} else if cfg!(feature = "blas-static") {
+    "openblas-static"
 } else if cfg!(feature = "blas") {
     "openblas"
 } else {

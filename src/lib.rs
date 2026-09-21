@@ -10,10 +10,6 @@ extern crate accelerate_src;
 extern crate cblas;
 #[cfg(any(feature = "blas", feature = "blas-static"))]
 extern crate openblas_src;
-#[cfg(feature = "blis")]
-extern crate blis_src;
-#[cfg(feature = "mkl")]
-extern crate intel_mkl_src;
 
 use simsimd::SpatialSimilarity;
 

@@ -5,11 +5,7 @@ use rayon::prelude::*;
 
 #[cfg(feature = "accelerate")]
 extern crate accelerate_src;
-#[cfg(feature = "blis")]
-extern crate blis_src;
 extern crate cblas;
-#[cfg(feature = "mkl")]
-extern crate intel_mkl_src;
 #[cfg(any(feature = "blas", feature = "blas-static"))]
 extern crate openblas_src;
 

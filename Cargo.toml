@@ -10,9 +10,6 @@ rayon = "1.10.0"
 anyhow = "1.0.89"
 accelerate-src = { version = "0.3.2", optional = true }
 openblas-src = { version = "0.10.16", optional = true }
-blis-src = { version = "0.2.2", optional = true }
-# LP64: the cblas crate and ndarray pass 32-bit ints; the crate's default is ILP64.
-intel-mkl-src = { version = "0.8.1", optional = true, features = ["mkl-static-lp64-iomp"] }
 cblas = "0.5.0"
 # Optional dependencies for test and benchmarks
 ndarray-rand = { version = "0.16.0", optional = true }
@@ -30,12 +27,12 @@ criterion = { version = "0.8.2", default-features = false }
 
 [features]
 default = []
+# One backend per platform, each the fastest measured there: Accelerate on macOS, OpenBLAS
+# everywhere else. BLIS and MKL were benchmarked and dropped; see the commit that removed them.
 accelerate = ["accelerate-src", "ndarray/blas"]
 blas = ["openblas-src", "ndarray/blas"]
 # Same OpenBLAS, linked statically: the binary then carries it, which suits slim runtime images.
 blas-static = ["openblas-src", "openblas-src/static", "ndarray/blas"]
-blis = ["blis-src", "ndarray/blas"]
-mkl = ["intel-mkl-src", "ndarray/blas"]
 testing = ["ndarray-rand", "memmap2", "safetensors", "serde_json", "serde"]
 
 [[test]]
