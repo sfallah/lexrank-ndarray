@@ -20,8 +20,8 @@
 use cblas::{sgemm, ssyrk, Layout, Part, Transpose};
 use criterion::{criterion_group, BatchSize, Bencher, BenchmarkId, Criterion, SamplingMode};
 use lexrank_ndarray::cblas_impl::{
-    blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_degree_centrality_scores,
-    blas_lexrank_array,
+    blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_cosine_f32_matrix_syrk,
+    blas_degree_centrality_scores, blas_lexrank_array,
 };
 use lexrank_ndarray::testing::{array2_from_vec, load_split_vec, load_splits_data};
 use lexrank_ndarray::{degree_centrality_scores, lexrank_array, normalize_l2, similarity_matrix};
@@ -333,47 +333,31 @@ fn gram_ssyrk(e: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     gram
 }
 
-/// Cosine similarity through one `ssyrk`: the upper triangle of `E·Eᵀ`, scaled by the norms read
-/// off its diagonal, then mirrored. Same work as the per-pair `sdot` loop (one triangle), but in
-/// a single BLAS call. Not in the library; benchmarked to see whether it should be.
-fn similarity_ssyrk(e: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    let mut sim = gram_ssyrk(e, rows, cols);
-    let inv_norm: Vec<f32> = (0..rows)
-        .map(|i| 1.0 / sim[i * rows + i].sqrt().max(f32::MIN_POSITIVE))
-        .collect();
-    for i in 0..rows {
-        sim[i * rows + i] = 1.0;
-        for j in (i + 1)..rows {
-            let s = sim[i * rows + j] * inv_norm[i] * inv_norm[j];
-            sim[i * rows + j] = s;
-            sim[j * rows + i] = s;
-        }
-    }
-    sim
-}
-
 /// Split the similarity step into its parts and compare it with one-call alternatives.
 /// Run single-threaded like `kernel_benches` (and optionally again with the BLAS default
-/// threads). Before timing, `similarity_ssyrk` is checked against `similarity_matrix`.
+/// threads). Before timing, `blas_cosine_f32_matrix_syrk` is checked against `similarity_matrix`.
 ///
 /// - `normalize-ndarray` + `gram-ndarray_dot` make up `total-ndarray` (`similarity_matrix`).
 /// - `gram-sgemm` is the same full Gram matrix straight through CBLAS, without ndarray.
 /// - `gram-ssyrk` computes only its upper triangle; `total-ssyrk` adds the norm scaling.
-/// - `norms-snrm2` is the first half of `total-cblas_sdot` (`blas_cosine_f32_matrix`).
+/// - `norms-snrm2` is `snrm2` per row, what `blas_cosine_f32_matrix` used before it took
+///   norms from `sdot`; `total-cblas_sdot` is that function as it is now.
 fn similarity_benches(c: &mut Criterion) {
     let mut inputs: Vec<(String, Vec<Split>)> = [DATASETS[0], DATASETS[3]]
         .iter()
         .map(|(name, path)| (name.to_string(), load_dataset(path)))
         .collect();
-    for rows in [16, 32, 64, 128, 256] {
-        let split = synthetic_split(rows, 768, rows as u64);
-        inputs.push((format!("d768-n{rows}"), vec![split]));
+    for cols in [384, 768, 1536] {
+        for rows in [16, 24, 32, 48, 64, 128] {
+            let split = synthetic_split(rows, cols, (rows * cols) as u64);
+            inputs.push((format!("d{cols}-n{rows}"), vec![split]));
+        }
     }
 
     for (name, splits) in &inputs {
         for s in splits {
             let expected = similarity_matrix(&mut s.array.clone());
-            let got = similarity_ssyrk(&s.flat, s.rows, s.cols);
+            let got = blas_cosine_f32_matrix_syrk(&s.flat, s.rows, s.cols);
             let diff = expected
                 .iter()
                 .zip(&got)
@@ -448,7 +432,7 @@ fn similarity_benches(c: &mut Criterion) {
         group.bench_function(
             "total-ssyrk",
             per_split(splits, flat, |v, s| {
-                let sim = similarity_ssyrk(&v, s.rows, s.cols);
+                let sim = blas_cosine_f32_matrix_syrk(&v, s.rows, s.cols);
                 (v, sim)
             }),
         );
