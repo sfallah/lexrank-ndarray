@@ -245,7 +245,9 @@ pub fn lexrank_array(
 /// The cosine **similarity** matrix through SimSIMD, for comparison with the BLAS routes.
 ///
 /// `simsimd`'s `f32::cosine` returns the cosine *distance*, `1 - similarity`, so each entry is
-/// converted back and the result matches `similarity_matrix`.
+/// converted back. The diagonal is written as 1.0, the convention the CBLAS routes follow too;
+/// `similarity_matrix` computes it instead, and so returns 0.0 for an all-zero row. No fixture
+/// has one, and on those the two agree to 1.7e-6.
 pub fn ss_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     assert_eq!(matrix.len(), r * c);
 
