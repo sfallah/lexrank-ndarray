@@ -1,3 +1,4 @@
+use crate::zero_rows_without_direction;
 use anyhow::bail;
 use cblas::*;
 use rayon::prelude::*;
@@ -326,8 +327,11 @@ pub fn blas_cosine_f32_matrix_syrk(matrix: &[f32], r: usize, c: usize) -> Vec<f3
         )
     };
 
-    let inv_norm: Vec<f32> = (0..r)
-        .map(|i| 1.0 / sim[i * r + i].sqrt().max(f32::MIN_POSITIVE))
+    // `ssyrk` left ‖row i‖² on the diagonal.
+    let norms: Vec<f32> = (0..r).map(|i| sim[i * r + i].sqrt()).collect();
+    let inv_norm: Vec<f32> = norms
+        .iter()
+        .map(|norm| 1.0 / norm.max(f32::MIN_POSITIVE))
         .collect();
     for i in 0..r {
         sim[i * r + i] = 1.0;
@@ -337,6 +341,7 @@ pub fn blas_cosine_f32_matrix_syrk(matrix: &[f32], r: usize, c: usize) -> Vec<f3
             sim[j * r + i] = s;
         }
     }
+    zero_rows_without_direction(&mut sim, &norms, r);
     sim
 }
 
@@ -398,6 +403,9 @@ pub fn blas_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
             result[j * r + i] = sim;
         }
     }
+
+    // ❹ rows without a direction, whose `blas_cosine_f32_opt` came out as 0/0 = NaN
+    zero_rows_without_direction(&mut result, &norms, r);
 
     result
 }
@@ -504,7 +512,7 @@ pub fn blas_lexrank_array(
         .enumerate() // (idx, score)
         .collect();
 
-    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
 
     Ok(ranked)
 }
@@ -534,25 +542,28 @@ pub fn blas_cosine_f32_matrix_opt(matrix: &[f32], r: usize, c: usize) -> Vec<f32
     }
 
     // 2) norms (avoid div-by-zero)
-    let mut norms = vec![0.0f32; r];
-    for i in 0..r {
-        let ni = blas_norm2_f32(&matrix[i * c..(i + 1) * c]).max(f32::MIN_POSITIVE);
-        norms[i] = ni;
-    }
+    let norms: Vec<f32> = (0..r)
+        .map(|i| blas_norm2_f32(&matrix[i * c..(i + 1) * c]))
+        .collect();
+    let scale: Vec<f32> = norms
+        .iter()
+        .map(|n| 1.0 / n.max(f32::MIN_POSITIVE))
+        .collect();
 
     // 3) divide by outer product of norms: C[i,j] /= norms[i]*norms[j]
     //    First scale rows, then columns (sscal supports strided columns).
     for i in 0..r {
-        unsafe { sscal(r as i32, 1.0 / norms[i], &mut gram[i * r..], 1) };
+        unsafe { sscal(r as i32, scale[i], &mut gram[i * r..], 1) };
     }
     for j in 0..r {
-        unsafe { sscal(r as i32, 1.0 / norms[j], &mut gram[j..], r as i32) };
+        unsafe { sscal(r as i32, scale[j], &mut gram[j..], r as i32) };
     }
 
     // 4) clamp diagonal to 1 (small num errors)
     for i in 0..r {
         gram[i * r + i] = 1.0;
     }
+    zero_rows_without_direction(&mut gram, &norms, r);
     gram
 }
 

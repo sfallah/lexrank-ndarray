@@ -38,6 +38,36 @@ pub fn normalize_l2(normed: &mut Array2<f32>) {
         });
 }
 
+/// Whether a row's norm gives it a direction to compare against: `false` for an all-zero row,
+/// and for one holding an infinity or a NaN.
+///
+/// The cosine of such a row is undefined. Computing it anyway divides by zero, and the NaN that
+/// produces spreads through the Markov matrix into every score. `normalize_l2` substitutes a norm
+/// of 1 and so leaves a zero row at zero, which makes the ndarray path return zeros for its whole
+/// row and column, diagonal included; the cosine routines that do not go through `normalize_l2`
+/// check this instead and write the same zeros.
+#[inline(always)]
+pub(crate) fn has_direction(norm: f32) -> bool {
+    norm > 0.0 && norm.is_finite()
+}
+
+/// Zero the row and the column of every row that has no direction, diagonal included.
+///
+/// The cosine routines that divide by the norms leave `0/0 = NaN` in exactly those places, so
+/// this runs once over the finished `r × r` matrix rather than testing every pair inside the
+/// loops: skipping a row costs one comparison, and no embedding set in practice has such a row.
+pub(crate) fn zero_rows_without_direction(sim: &mut [f32], norms: &[f32], r: usize) {
+    for i in 0..r {
+        if has_direction(norms[i]) {
+            continue;
+        }
+        for j in 0..r {
+            sim[i * r + j] = 0.0;
+            sim[j * r + i] = 0.0;
+        }
+    }
+}
+
 #[inline(always)]
 pub fn similarity_matrix(embeddings: &mut Array2<f32>) -> Array2<f32> {
     normalize_l2(embeddings);
@@ -238,21 +268,31 @@ pub fn lexrank_array(
     let scores = centrality_scores(&sim_matrix, false, threshold, max_iter, true)?;
     let scores_vec: Vec<f32> = scores.flatten().to_vec();
     let mut ranked_sentences: Vec<_> = (0..no_seq as usize).zip(scores_vec).collect();
-    ranked_sentences.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    ranked_sentences.sort_by(|a, b| b.1.total_cmp(&a.1));
     Ok(ranked_sentences)
 }
 
 /// The cosine **similarity** matrix through SimSIMD, for comparison with the BLAS routes.
 ///
 /// `simsimd`'s `f32::cosine` returns the cosine *distance*, `1 - similarity`, so each entry is
-/// converted back. The diagonal is written as 1.0, the convention the CBLAS routes follow too;
-/// `similarity_matrix` computes it instead, and so returns 0.0 for an all-zero row. No fixture
-/// has one, and on those the two agree to 1.7e-6.
+/// converted back. Rows without a direction are handled as `has_direction` describes, since
+/// simsimd calls two zero rows identical (distance 0) and a zero row orthogonal to every other
+/// (distance 1), neither of which matches the ndarray path.
 pub fn ss_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     assert_eq!(matrix.len(), r * c);
 
     // ❶ allocate the square result (row-major)
     let mut result = vec![0.0f32; r * r];
+
+    let norms: Vec<f32> = (0..r)
+        .map(|i| {
+            matrix[i * c..(i + 1) * c]
+                .iter()
+                .map(|x| x * x)
+                .sum::<f32>()
+                .sqrt()
+        })
+        .collect();
 
     // ❷ process each *row slice* of `result` in parallel
     //
@@ -281,6 +321,9 @@ pub fn ss_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
             result[j * r + i] = sim;
         }
     }
+
+    // ❹ rows without a direction, which simsimd would otherwise call identical to each other
+    zero_rows_without_direction(&mut result, &norms, r);
 
     result
 }

@@ -2,7 +2,7 @@
 pub mod tests {
     use lexrank_ndarray::cblas_impl::{
         blas_cosine_f32_matrix, blas_cosine_f32_matrix_opt, blas_cosine_f32_matrix_syrk,
-        blas_lexrank_array, blas_softmax, SYRK_MIN_ROWS,
+        blas_cosine_matrix, blas_lexrank_array, blas_softmax, SYRK_MIN_ROWS,
     };
     use lexrank_ndarray::testing::{
         array2_from_vec, f32_close, get_rand_arr1_f32, get_rand_arr2_f32, load_split_tensor,
@@ -347,6 +347,61 @@ pub mod tests {
             }
         }
         println!("max |diff| ndarray vs simsimd {max_diff:e}");
+        Ok(())
+    }
+
+    /// A row of zeros has no direction, so every route must return zeros for it instead of
+    /// dividing by zero. The per-pair `sdot` route used to return NaN there, which spread through
+    /// the Markov matrix into every score and made the sort in `blas_lexrank_array` panic.
+    ///
+    /// Both arms of `blas_cosine_matrix`' dispatch are covered, and two such rows rather than one,
+    /// since simsimd calls that pair identical.
+    #[test]
+    fn rows_without_a_direction_match_the_ndarray_path() -> anyhow::Result<()> {
+        for rows in [8usize, SYRK_MIN_ROWS + 8] {
+            let cols = 32;
+            let mut embeddings: Vec<f32> = get_rand_arr2_f32(rows, cols, 0.0, 1.0)?
+                .iter()
+                .copied()
+                .collect();
+            for i in [0usize, 3] {
+                embeddings[i * cols..(i + 1) * cols].fill(0.0);
+            }
+
+            let nd = similarity_matrix(&mut array2_from_vec(&embeddings, &vec![rows, cols])?);
+            for (route, sim) in [
+                ("sdot", blas_cosine_f32_matrix(&embeddings, rows, cols)),
+                ("syrk", blas_cosine_f32_matrix_syrk(&embeddings, rows, cols)),
+                ("sgemm", blas_cosine_f32_matrix_opt(&embeddings, rows, cols)),
+                ("dispatch", blas_cosine_matrix(&embeddings, rows, cols)),
+                ("simsimd", ss_cosine_f32_matrix(&embeddings, rows, cols)),
+            ] {
+                for i in 0..rows {
+                    for j in 0..rows {
+                        let (got, want) = (sim[i * rows + j], nd[[i, j]]);
+                        assert!(
+                            got.is_finite() && (got - want).abs() <= SIM_TOL,
+                            "{rows} rows, {route}: sim[{i}][{j}] is {got}, ndarray {want}"
+                        );
+                    }
+                }
+            }
+
+            // ... and the two pipelines still agree, where the CBLAS one used to panic
+            let nd_ranked = lexrank_array(&embeddings, rows, cols, None, 10000)?;
+            let blas_ranked = blas_lexrank_array(&embeddings, rows, cols, None, 10000)?;
+            let mut nd_score = vec![f32::NAN; rows];
+            for &(idx, score) in &nd_ranked {
+                nd_score[idx] = score;
+            }
+            for &(idx, score) in &blas_ranked {
+                assert!(
+                    score.is_finite() && (score - nd_score[idx]).abs() <= SCORE_TOL,
+                    "{rows} rows: sentence {idx} ndarray {} blas {score}",
+                    nd_score[idx]
+                );
+            }
+        }
         Ok(())
     }
 
