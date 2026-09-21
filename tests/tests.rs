@@ -10,6 +10,7 @@ pub mod tests {
     };
     use lexrank_ndarray::{
         cos_similarity, lexrank_array, normalize_l2, similarity_matrix, softmax,
+        ss_cosine_f32_matrix,
     };
     use ndarray::{array, Array1, Array2, Axis};
     use rayon::prelude::ParallelSliceMut;
@@ -317,6 +318,35 @@ pub mod tests {
             }
         }
         println!("{rankings} rankings, max |score diff| {max_diff:e}");
+        Ok(())
+    }
+
+    /// `ss_cosine_f32_matrix` returns similarities, not the distances `simsimd` hands back.
+    #[test]
+    fn parity_similarity_matrix_simsimd() -> anyhow::Result<()> {
+        let mut max_diff = 0f32;
+        for data_path in PARITY_DATASETS {
+            for split in load_splits_data(data_path)? {
+                let (shape, embeddings) = load_split_vec(data_path, &split)?;
+                let (rows, cols) = (shape[0], shape[1]);
+                let nd = similarity_matrix(&mut array2_from_vec(&embeddings, &shape)?);
+                let ss = ss_cosine_f32_matrix(&embeddings, rows, cols);
+                for i in 0..rows {
+                    for j in 0..rows {
+                        let d = (ss[i * rows + j] - nd[[i, j]]).abs();
+                        assert!(
+                            d <= SIM_TOL,
+                            "{data_path} split {}: sim[{i}][{j}] ndarray {} simsimd {}",
+                            split.split_id,
+                            nd[[i, j]],
+                            ss[i * rows + j]
+                        );
+                        max_diff = max_diff.max(d);
+                    }
+                }
+            }
+        }
+        println!("max |diff| ndarray vs simsimd {max_diff:e}");
         Ok(())
     }
 

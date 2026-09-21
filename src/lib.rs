@@ -242,6 +242,10 @@ pub fn lexrank_array(
     Ok(ranked_sentences)
 }
 
+/// The cosine **similarity** matrix through SimSIMD, for comparison with the BLAS routes.
+///
+/// `simsimd`'s `f32::cosine` returns the cosine *distance*, `1 - similarity`, so each entry is
+/// converted back and the result matches `similarity_matrix`.
 pub fn ss_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
     assert_eq!(matrix.len(), r * c);
 
@@ -263,7 +267,8 @@ pub fn ss_cosine_f32_matrix(matrix: &[f32], r: usize, c: usize) -> Vec<f32> {
             let a = &matrix[i * c..(i + 1) * c];
             for j in (i + 1)..r {
                 let b = &matrix[j * c..(j + 1) * c];
-                row_i[j] = f32::cosine(a, b).unwrap() as f32; // upper-tri entry
+                // `cosine` gives the distance; the matrix holds similarities.
+                row_i[j] = 1.0 - f32::cosine(a, b).unwrap() as f32; // upper-tri entry
             }
         });
 
