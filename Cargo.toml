@@ -32,6 +32,8 @@ criterion = { version = "0.8.2", default-features = false }
 default = []
 accelerate = ["accelerate-src", "ndarray/blas"]
 blas = ["openblas-src", "ndarray/blas"]
+# Same OpenBLAS, linked statically: the binary then carries it, which suits slim runtime images.
+blas-static = ["openblas-src", "openblas-src/static", "ndarray/blas"]
 blis = ["blis-src", "ndarray/blas"]
 mkl = ["intel-mkl-src", "ndarray/blas"]
 testing = ["ndarray-rand", "memmap2", "safetensors", "serde_json", "serde"]

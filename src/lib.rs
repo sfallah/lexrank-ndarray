@@ -8,7 +8,7 @@ pub mod testing;
 #[cfg(feature = "accelerate")]
 extern crate accelerate_src;
 extern crate cblas;
-#[cfg(feature = "blas")]
+#[cfg(any(feature = "blas", feature = "blas-static"))]
 extern crate openblas_src;
 #[cfg(feature = "blis")]
 extern crate blis_src;
